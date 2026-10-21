@@ -186,16 +186,16 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    subgraph TrafficFlow["GCP Inbound & Identity Security Pipeline"]
-        Packet["Incoming Ingress Packet"] --> FW1{"1. GCP VPC Firewall Filter\n(Stateful Tag-Based Inspection)"}
-        FW1 -->|Port 8001 / 9464 Allowed| GKE_Node["2. GKE Node & Container Runtime\n(Non-Root UID 10001)"]
-        FW1 -->|Port 5432 / 6379 / 9092 Allowed from Tag alert-engine| Data_Node["Data Tier Services"]
-        FW1 -->|Rule Deny (Priority 2000)| Drop["Dropped Packet (FW Denied)"]
+    subgraph TrafficFlow["GCP Inbound and Identity Security Pipeline"]
+        Packet["Incoming Ingress Packet"] --> FW1{"1. GCP VPC Firewall Filter"}
+        FW1 -->|Port 8001 and 9464 Allowed| GKE_Node["2. GKE Node and Container Runtime (Non-Root UID 10001)"]
+        FW1 -->|"Port 5432, 6379, 9092 Allowed from Tag alert-engine"| Data_Node["Data Tier Services"]
+        FW1 -->|"Rule Deny Priority 2000"| Drop["Dropped Packet (FW Denied)"]
         
-        GKE_Node --> WI_Auth{"3. GKE Workload Identity\n(JWT Federated Token Exchange)"}
+        GKE_Node --> WI_Auth{"3. GKE Workload Identity"}
         WI_Auth -->|Assume Service Account| GCP_Token["GCP Short-Lived Access Token"]
-        GCP_Token --> DecryptSecret["4. Secret Manager + KMS Decryption\n(Read Database Password)"]
-        DecryptSecret --> SecureBoot["5. Secure Engine Boot & Execution"]
+        GCP_Token --> DecryptSecret["4. Secret Manager and KMS Decryption"]
+        DecryptSecret --> SecureBoot["5. Secure Engine Boot and Execution"]
     end
 ```
 
@@ -235,12 +235,6 @@ flowchart TD
     end
 
     StreamingPlane -->|"Poll & Commit Offsets"| Worker["alert-engine Consumer"]
-    Worker -->|"HINCRBY / Sliding Window Query"| MemoryTier
-    Worker -->|"INSERT ON CONFLICT"| RelationalStore
-    Worker -.->|"Flush Diagnostic Dumps"| ObjectStore
-```
-
-    IngestionStream -->|"Poll & Commit Offsets"| Worker["alert-engine Consumer"]
     Worker -->|"HINCRBY / Sliding Window Query"| MemoryTier
     Worker -->|"INSERT ON CONFLICT"| RelationalStore
     Worker -.->|"Flush Diagnostic Dumps"| ObjectStore
