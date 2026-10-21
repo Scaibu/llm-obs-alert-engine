@@ -21,7 +21,7 @@ if str(repo_root) not in sys.path:
 if str(repo_root / "src") not in sys.path:
     sys.path.insert(0, str(repo_root / "src"))
 
-from worker.config import load_config
+from config.config import load_config
 from worker.registry import build_registry
 from adapters.postgres.postgres_adapter import PostgresAdapter
 from adapters.redis.redis_adapter import RedisAdapter
@@ -55,28 +55,47 @@ def _extract_traceparent(headers: Any) -> Context | None:
         key, value = item[0], item[1]
         if value is None:
             continue
+        key_str = key.decode("utf-8") if isinstance(key, bytes) else str(key)
         decoded = value.decode("utf-8") if isinstance(value, bytes) else str(value)
-        if key == "traceparent":
+        if key_str == "traceparent":
             carrier["traceparent"] = decoded
-        elif key == "tracestate":
+        elif key_str == "tracestate":
             carrier["tracestate"] = decoded
     if not carrier:
         return None
     propagator = TraceContextTextMapPropagator()
     return propagator.extract(carrier)
 
-class _HealthHandler(BaseHTTPRequestHandler):
+class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"status":"ok"}')
+        if self.path == "/healthz":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","service":"alert-engine"}')
+        elif self.path == "/readyz":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ready"}')
+        elif self.path in ("/", "/health"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+        else:
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"error":"not found"}')
 
     def log_message(self, format: str, *args: Any) -> None:
         pass
 
+_HealthHandler = HealthCheckHandler
+
 def _start_health_server(port: int) -> HTTPServer:
-    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server

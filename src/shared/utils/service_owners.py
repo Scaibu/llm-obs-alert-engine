@@ -8,7 +8,15 @@ def load_service_owners(file_path: str) -> dict[str, str]:
     with tracer.start_as_current_span("service_owners.load", attributes={"config.path": file_path}):
         path = Path(file_path)
         if not path.exists():
-            return {}
+            pkg_root = Path(__file__).resolve().parents[3]
+            alt1 = pkg_root / file_path
+            alt2 = pkg_root / "config" / "service_owners.yaml"
+            if alt1.exists():
+                path = alt1
+            elif alt2.exists():
+                path = alt2
+            else:
+                return {}
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)

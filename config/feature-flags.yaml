@@ -1,0 +1,13 @@
+flags:
+  rate_limiting_enabled:
+    enabled: true
+    rollout_percentage: 100
+  slack_notifications_enabled:
+    enabled: true
+    rollout_percentage: 100
+  pagerduty_notifications_enabled:
+    enabled: true
+    rollout_percentage: 100
+  distributed_tracing_enabled:
+    enabled: true
+    rollout_percentage: 100

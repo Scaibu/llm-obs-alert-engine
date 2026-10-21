@@ -13,6 +13,7 @@ COPY scripts ./scripts
 COPY contracts ./contracts
 COPY database ./database
 COPY messaging ./messaging
+COPY config ./config
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .

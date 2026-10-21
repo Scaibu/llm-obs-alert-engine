@@ -5,7 +5,7 @@ from pathlib import Path
 base_dir = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(base_dir / "src"))
 
-from worker.config import load_config
+from config.config import load_config
 
 def main() -> None:
     if len(sys.argv) < 2:

@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alert-engine-staging
+  namespace: argocd
+spec:
+  project: alert-engine
+  source:
+    repoURL: https://github.com/scaibu/llm-obs-python-packages
+    targetRevision: main
+    path: alert-engine/deploy/k8s/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: llmobs-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

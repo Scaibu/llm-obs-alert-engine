@@ -1,0 +1,20 @@
+server:
+  host: "0.0.0.0"
+  port: 8001
+  health_check_port: 8001
+  prometheus_metrics_port: 9464
+  service_name: "alert-engine"
+
+kafka:
+  bootstrap_servers: "llmobs-kafka:9092"
+  consumer_group: "alert-engine-group"
+
+redis:
+  url: "redis://:llmobs_redis_s3cret_2024@llmobs-redis:6379/0"
+
+postgres:
+  host: "alloydb"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  db: "ewma_db"

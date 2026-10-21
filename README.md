@@ -401,7 +401,7 @@ You can import the adapters, config loaders, and handlers directly in your Pytho
 
 #### Loading Configurations programmatically:
 ```python
-from worker.config import load_config
+from config.config import load_config
 
 # Automatically loads and validates config from environment variables
 config = load_config()

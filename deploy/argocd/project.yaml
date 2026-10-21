@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: alert-engine
+  namespace: argocd
+spec:
+  description: ArgoCD Project for alert-engine worker service
+  sourceRepos:
+    - "https://github.com/scaibu/llm-obs-python-packages"
+    - "https://github.com/scaibu/*"
+  destinations:
+    - namespace: "llmobs-dev"
+      server: "https://kubernetes.default.svc"
+    - namespace: "llmobs-staging"
+      server: "https://kubernetes.default.svc"
+    - namespace: "llmobs-prod"
+      server: "https://kubernetes.default.svc"
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

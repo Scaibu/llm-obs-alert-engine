@@ -1,0 +1,27 @@
+server:
+  host: "127.0.0.1"
+  port: 8001
+  health_check_port: 8001
+  prometheus_metrics_port: 9464
+  service_name: "alert-engine-test"
+
+kafka:
+  bootstrap_servers: "localhost:9099"
+  consumer_group: "test-alert-engine-group"
+  topics:
+    - "alerts.budget"
+    - "alerts.cost.anomaly"
+    - "llm.toxicity.flagged"
+    - "alerts.quality.degradation"
+    - "alerts.latency.slo"
+    - "alerts.latency.ttft_regression"
+
+redis:
+  url: "redis://localhost:6389/0"
+
+postgres:
+  host: "localhost"
+  port: 5439
+  user: "postgres"
+  password: "postgres"
+  db: "ewma_db_test"

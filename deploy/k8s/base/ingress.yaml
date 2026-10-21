@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: alert-engine-ingress
+  labels:
+    app.kubernetes.io/name: alert-engine
+    app.kubernetes.io/part-of: llm-obs
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - host: alert-engine.llmobs.internal
+      http:
+        paths:
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: alert-engine
+                port:
+                  number: 8001
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: alert-engine
+                port:
+                  number: 9464

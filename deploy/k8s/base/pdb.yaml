@@ -1,0 +1,12 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: alert-engine-pdb
+  labels:
+    app.kubernetes.io/name: alert-engine
+    app.kubernetes.io/part-of: llm-obs
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alert-engine

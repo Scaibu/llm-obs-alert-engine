@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-engine-config
+  labels:
+    app.kubernetes.io/name: alert-engine
+    app.kubernetes.io/part-of: llm-obs
+data:
+  APP_ENV: "production"
+  HEALTH_CHECK_PORT: "8001"
+  PROMETHEUS_METRICS_PORT: "9464"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka.llmobs.internal:9092"
+  KAFKA_CONSUMER_GROUP: "alert-engine-group"
+  KAFKA_TOPICS: "alerts.budget,alerts.cost.anomaly,llm.toxicity.flagged,alerts.quality.degradation,alerts.latency.slo,alerts.latency.ttft_regression"
+  REDIS_URL: "redis://redis.llmobs.internal:6379/0"
+  POSTGRES_HOST: "alloydb.llmobs.internal"
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: "postgres"
+  POSTGRES_PASSWORD: "postgres"
+  POSTGRES_DB: "ewma_db"
+  SLACK_WEBHOOK_URL: "http://slack-sink.llmobs.internal:8080/mock-slack"
+  PAGERDUTY_ROUTING_KEY: "mock-pagerduty-routing-key"
+  SERVICE_OWNERS_FILE_PATH: "config/service_owners.yaml"
