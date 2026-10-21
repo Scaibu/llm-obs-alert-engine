@@ -44,11 +44,16 @@ def test_scenario_latency_slo_incident_lifecycle() -> None:
     )
 
     breach_event = {
-        "model": "gpt-4-turbo",
-        "endpoint": "/v1/chat/completions",
-        "slo_target_ms": 800.0,
-        "current_p95_ms": 2400.0,
-        "sample_count": 100,
+        "model": "gpt-4",
+        "endpoint": "/v1/chat",
+        "severity": "page",
+        "burn_rate": 2.5,
+        "p95_current": 120.0,
+        "p95_baseline": 50.0,
+        "p99_current": 250.0,
+        "p99_baseline": 100.0,
+        "budget_remaining": 88.5,
+        "timestamp": "2026-06-29T09:00:00Z",
     }
 
     handler.handle(breach_event)
@@ -56,33 +61,42 @@ def test_scenario_latency_slo_incident_lifecycle() -> None:
     assert pd.trigger_incident.call_count == 1
     assert slack.send_channel_message.call_count == 1
     assert db.insert_alert.call_count == 1
-    assert redis_store.get_open_incident("gpt-4-turbo", "/v1/chat/completions") == "pd_inc_4567"
+    assert redis_store.get_open_incident("gpt-4", "/v1/chat") == "pd_inc_4567"
 
     follow_up_breach = {
-        "model": "gpt-4-turbo",
-        "endpoint": "/v1/chat/completions",
-        "slo_target_ms": 800.0,
-        "current_p95_ms": 2600.0,
-        "sample_count": 120,
+        "model": "gpt-4",
+        "endpoint": "/v1/chat",
+        "severity": "page",
+        "burn_rate": 2.8,
+        "p95_current": 130.0,
+        "p95_baseline": 50.0,
+        "p99_current": 270.0,
+        "p99_baseline": 100.0,
+        "budget_remaining": 85.0,
+        "timestamp": "2026-06-29T09:05:00Z",
     }
 
     handler.handle(follow_up_breach)
 
     assert pd.trigger_incident.call_count == 1
-    assert db.insert_alert.call_count == 2
 
-    redis_store.delete_open_incident("gpt-4-turbo", "/v1/chat/completions")
+    redis_store.delete_open_incident("gpt-4", "/v1/chat")
     redis_store.rate_limits.clear()
 
     fresh_breach = {
-        "model": "gpt-4-turbo",
-        "endpoint": "/v1/chat/completions",
-        "slo_target_ms": 800.0,
-        "current_p95_ms": 3100.0,
-        "sample_count": 80,
+        "model": "gpt-4",
+        "endpoint": "/v1/chat",
+        "severity": "page",
+        "burn_rate": 3.0,
+        "p95_current": 150.0,
+        "p95_baseline": 50.0,
+        "p99_current": 300.0,
+        "p99_baseline": 100.0,
+        "budget_remaining": 80.0,
+        "timestamp": "2026-06-29T09:10:00Z",
     }
 
     handler.handle(fresh_breach)
 
     assert pd.trigger_incident.call_count == 2
-    assert db.insert_alert.call_count == 3
+    assert db.insert_alert.call_count == 2

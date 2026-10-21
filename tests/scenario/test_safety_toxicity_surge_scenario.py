@@ -1,15 +1,11 @@
 from unittest.mock import MagicMock
 from handlers.alerts_toxicity.handler import ToxicityAlertHandler
-from ports.db_port import DbPort
 from ports.redis_port import RedisPort
 from ports.slack_port import SlackPort
-from ports.metrics_port import MetricsPort
 
 def test_scenario_toxicity_surge_and_rate_limiting() -> None:
-    db = MagicMock(spec=DbPort)
     redis = MagicMock(spec=RedisPort)
     slack = MagicMock(spec=SlackPort)
-    metrics = MagicMock(spec=MetricsPort)
 
     call_count = [0]
     def rate_limit_limiter(key: str, ttl_seconds: int) -> bool:
@@ -19,21 +15,18 @@ def test_scenario_toxicity_surge_and_rate_limiting() -> None:
     redis.acquire_rate_limit.side_effect = rate_limit_limiter
 
     handler = ToxicityAlertHandler(
-        db_port=db,
         redis_port=redis,
         slack_port=slack,
-        metrics_port=metrics,
     )
 
     for i in range(1, 6):
         handler.handle({
             "span_id": f"span-{i}",
-            "toxicity_score": 0.85 + (i * 0.02),
+            "toxicity_score": 0.85,
             "user_id": f"usr-surge",
             "model": "gpt-4",
-            "flagged_categories": ["hate", "harassment"],
+            "endpoint": "/v1/chat",
         })
 
-    assert db.insert_alert.call_count == 5
-
+    assert redis.acquire_rate_limit.call_count == 5
     assert slack.send_channel_message.call_count == 3

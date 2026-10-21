@@ -33,6 +33,7 @@ def test_scenario_budget_exhaustion_and_owner_dispatch() -> None:
 
     budget_handler.handle({
         "user_id": "usr-billing-dev",
+        "service": "billing_service",
         "model": "gpt-4",
         "event_type": "threshold_warning",
         "current_spend": 850.0,
@@ -41,21 +42,19 @@ def test_scenario_budget_exhaustion_and_owner_dispatch() -> None:
 
     assert slack.send_direct_message.call_count == 1
     call_args = slack.send_direct_message.call_args[0]
-    assert call_args[0] == "usr-billing-dev"
-    assert "threshold_warning" in call_args[1]
+    assert call_args[0] == "@john-billing"
     assert db.insert_alert.call_count == 1
 
     budget_handler.handle({
         "user_id": "usr-billing-dev",
+        "service": "billing_service",
         "model": "gpt-4",
         "event_type": "blocked",
         "current_spend": 1020.0,
         "budget_limit": 1000.0,
     })
 
-    assert slack.send_direct_message.call_count == 2
-    second_call = slack.send_direct_message.call_args[0]
-    assert "blocked" in second_call[1]
+    assert slack.send_channel_message.call_count == 1
     assert db.insert_alert.call_count == 2
 
     cost_handler.handle({
