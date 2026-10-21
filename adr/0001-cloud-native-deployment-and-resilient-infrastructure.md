@@ -260,39 +260,110 @@ flowchart TD
 
 `alert-engine` communicates across the monorepo using versioned asynchronous contracts registered in `messaging/schemas/`:
 
-```text
-+------------------------------------------------------------------------------------------------------------------------+
-|                                        ALERT ENGINE MESSAGING ARCHITECTURE                                             |
-+------------------------------------------------------------------------------------------------------------------------+
+```mermaid
+flowchart TD
+    subgraph SiblingServices["Monorepo Sibling Producers (Polyglot Sub-Packages)"]
+        direction TB
+        BudgetService["budget-provisioner\n(Go / Python)"]
+        CostService["event-cost\n(Python Daemon)"]
+        ToxicityService["toxicity\n(Rust / Python)"]
+        QualityService["quality-engine\n(Python ML)"]
+        LatencyService["latency-engine\n(Go / Python)"]
+        SloService["slo-burn-worker\n(Python Engine)"]
+    end
 
-  [budget-provisioner]           [event-cost]               [toxicity]             [latency-engine]
-          │                           │                          │                         │
-          │ (alerts.budget)           │ (alerts.cost.anomaly)    │ (llm.toxicity.flagged)  │ (alerts.latency.slo)
-          ▼                           ▼                          ▼                         ▼
-   ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
-   │                                 CENTRAL KAFKA MESSAGE BROKER                                │
-   │                                       (llmobs-kafka:9092)                                   │
-   │                                                                                             │
-   │  Partition 0                     Partition 1                     Partition 2                │
-   │  [Span Batch] -> [Budget Alert]  [Span Batch] -> [Cost Anomaly]  [Toxic Flag] -> [SLO Burn]  │
-   └─────────────────────────────────────────────────────────────────────────────────────────────┘
-                                                 │
-                                                 ▼ (Consumer Group: alert-engine-group)
-                               ┌───────────────────────────────────┐
-                               │       alert-engine Dispatcher     │
-                               │                                   │
-                               │  1. Parse CloudEvent Envelope     │
-                               │  2. Invariant Rules Engine        │
-                               │  3. Sliding Window Rate Limiter   │
-                               │  4. Service Ownership Resolver    │
-                               │  5. Audit Log Storage (Postgres)  │
-                               └───────────────────────────────────┘
-                                        │                 │
-                         (Slack Webhook)│                 │(PagerDuty Events API)
-                                        ▼                 ▼
-                                   ┌─────────┐       ┌─────────────┐
-                                   │ #alerts │       │ On-Call Eng │
-                                   └─────────┘       └─────────────┘
+    subgraph KafkaBroker["Central Kafka Streaming Plane (llmobs-kafka:9092)"]
+        direction TB
+        subgraph TopicBudget["Topic: alerts.budget"]
+            SchemaBudget["Contract: messaging/schemas/alerts.budget.yaml\n- tenant_id (string)\n- budget_limit (float)\n- current_spend (float)\n- currency (string)"]
+        end
+
+        subgraph TopicCost["Topic: alerts.cost.anomaly"]
+            SchemaCost["Contract: messaging/schemas/alerts.cost.anomaly.yaml\n- tenant_id (string)\n- metric (string)\n- current_spend (float)\n- window_mean (float)\n- sigma_threshold (float)"]
+        end
+
+        subgraph TopicTox["Topic: llm.toxicity.flagged"]
+            SchemaTox["Contract: messaging/schemas/llm.toxicity.flagged.yaml\n- prompt_id (string)\n- toxicity_score (float)\n- flagged_categories (list)\n- model (string)"]
+        end
+
+        subgraph TopicQuality["Topic: alerts.quality.degradation"]
+            SchemaQuality["Contract: messaging/schemas/alerts.quality.degradation.yaml\n- model (string)\n- degradation_score (float)\n- threshold (float)\n- baseline_score (float)"]
+        end
+
+        subgraph TopicLatency["Topic: alerts.latency.slo"]
+            SchemaLatency["Contract: messaging/schemas/alerts.latency.slo.yaml\n- endpoint (string)\n- slo_target_ms (float)\n- current_p95_ms (float)\n- sample_count (int)"]
+        end
+
+        subgraph TopicTtft["Topic: alerts.latency.ttft_regression"]
+            SchemaTtft["Contract: messaging/schemas/alerts.latency.ttft_regression.yaml\n- provider (string)\n- baseline_ttft_ms (float)\n- current_ttft_ms (float)\n- delta_percentage (float)"]
+        end
+    end
+
+    subgraph AlertEngineConsumer["alert-engine Consumer Pipeline (alert-engine-group)"]
+        direction TB
+        Dispatcher["Central Event Dispatcher & Envelope Builder\n(messaging/engine/consumers/dispatcher.py)"]
+        
+        subgraph Handlers["Feature Handlers & Invariant Rules"]
+            H_Budget["AlertsBudgetHandler\n(src/handlers/alerts_budget/)"]
+            H_Cost["AlertsCostAnomalyHandler\n(src/handlers/alerts_cost_anomaly/)"]
+            H_Tox["AlertsToxicityHandler\n(src/handlers/alerts_toxicity/)"]
+            H_Quality["AlertsQualityDegradationHandler\n(src/handlers/alerts_quality_degradation/)"]
+            H_Slo["AlertsLatencySloHandler\n(src/handlers/alerts_latency_slo/)"]
+            H_Ttft["AlertsLatencyTtftRegressionHandler\n(src/handlers/alerts_latency_ttft_regression/)"]
+        end
+
+        RateLimiter["Redis Sliding Window Rate Limiter & Deduplicator\n(src/shared/utils/rate_limiter.py)"]
+        OwnerResolver["Service Owners Registry Resolver\n(config/service_owners.yaml)"]
+        DeadLetterQueue["Dead Letter Pipeline Router (DLQ)\n(messaging/engine/pipeline/dead_letter_router.py)"]
+    end
+
+    subgraph Sinks["Operational Notification Sinks & Storage Plane"]
+        SlackChannel["Slack Webhook\n(#alerts / #security / #eng)"]
+        PagerDutyAlert["PagerDuty Events v2\n(P1/Critical Incidents)"]
+        AuditDB[("PostgreSQL / AlloyDB\nTable: alert_history")]
+        DLQTopic[("Kafka DLQ Topic\nalerts.dead_letter_queue")]
+    end
+
+    %% Event Ingestion
+    BudgetService -->|"Publishes CloudEvent"| TopicBudget
+    CostService -->|"Publishes CloudEvent"| TopicCost
+    ToxicityService -->|"Publishes CloudEvent"| TopicTox
+    QualityService -->|"Publishes CloudEvent"| TopicQuality
+    LatencyService -->|"Publishes CloudEvent"| TopicLatency
+    SloService -->|"Publishes CloudEvent"| TopicTtft
+
+    %% Consumption to Dispatcher
+    TopicBudget -->|"Poll (Offset Commit)"| Dispatcher
+    TopicCost -->|"Poll (Offset Commit)"| Dispatcher
+    TopicTox -->|"Poll (Offset Commit)"| Dispatcher
+    TopicQuality -->|"Poll (Offset Commit)"| Dispatcher
+    TopicLatency -->|"Poll (Offset Commit)"| Dispatcher
+    TopicTtft -->|"Poll (Offset Commit)"| Dispatcher
+
+    %% Dispatcher to Handlers
+    Dispatcher -->|"Route: alerts.budget"| H_Budget
+    Dispatcher -->|"Route: alerts.cost.anomaly"| H_Cost
+    Dispatcher -->|"Route: llm.toxicity.flagged"| H_Tox
+    Dispatcher -->|"Route: alerts.quality.degradation"| H_Quality
+    Dispatcher -->|"Route: alerts.latency.slo"| H_Slo
+    Dispatcher -->|"Route: alerts.latency.ttft_regression"| H_Ttft
+    Dispatcher -.->|"Malformed JSON / Schema Error"| DeadLetterQueue
+
+    %% Handlers to Shared Components
+    H_Budget --> RateLimiter
+    H_Cost --> RateLimiter
+    H_Tox --> RateLimiter
+    H_Quality --> RateLimiter
+    H_Slo --> RateLimiter
+    H_Ttft --> RateLimiter
+
+    RateLimiter -->|"Allowed"| OwnerResolver
+    RateLimiter -.->|"Rate Limited (Suppressed)"| AuditDB
+
+    OwnerResolver -->|"Channel & Mention"| SlackChannel
+    OwnerResolver -->|"P1 Escalation Key"| PagerDutyAlert
+    OwnerResolver -->|"Audit Trail"| AuditDB
+    DeadLetterQueue -->|"Poison Pill Storage"| DLQTopic
 ```
 
 ---
