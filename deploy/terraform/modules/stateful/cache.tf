@@ -1,3 +1,13 @@
+resource "aws_elasticache_subnet_group" "redis" {
+  name       = "${var.environment}-${var.service_name}-redis-subnet-group"
+  subnet_ids = var.subnet_ids
+
+  tags = {
+    Name        = "${var.environment}-${var.service_name}-redis-subnet-group"
+    Environment = var.environment
+  }
+}
+
 resource "aws_elasticache_cluster" "redis" {
   cluster_id           = "${var.environment}-${var.service_name}-cache"
   engine               = "redis"
@@ -5,6 +15,8 @@ resource "aws_elasticache_cluster" "redis" {
   num_cache_nodes      = 1
   parameter_group_name = "default.redis7"
   port                 = 6379
+  subnet_group_name    = aws_elasticache_subnet_group.redis.name
+  security_group_ids   = var.security_group_id != "" ? [var.security_group_id] : []
 
   tags = {
     Environment = var.environment

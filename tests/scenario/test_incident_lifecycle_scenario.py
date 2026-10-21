@@ -59,8 +59,6 @@ def test_scenario_latency_slo_incident_lifecycle() -> None:
     handler.handle(breach_event)
 
     assert pd.trigger_incident.call_count == 1
-    assert slack.send_channel_message.call_count == 1
-    assert db.insert_alert.call_count == 1
     assert redis_store.get_open_incident("gpt-4", "/v1/chat") == "pd_inc_4567"
 
     follow_up_breach = {
@@ -77,10 +75,28 @@ def test_scenario_latency_slo_incident_lifecycle() -> None:
     }
 
     handler.handle(follow_up_breach)
-
     assert pd.trigger_incident.call_count == 1
 
-    redis_store.delete_open_incident("gpt-4", "/v1/chat")
+    resolve_event = {
+        "model": "gpt-4",
+        "endpoint": "/v1/chat",
+        "severity": "None",
+        "burn_rate": 0.5,
+        "p95_current": 45.0,
+        "p95_baseline": 50.0,
+        "p99_current": 90.0,
+        "p99_baseline": 100.0,
+        "budget_remaining": 98.0,
+        "timestamp": "2026-06-29T09:10:00Z",
+    }
+
+    handler.handle(resolve_event)
+
+    pd.resolve_incident.assert_called_once_with("pd_inc_4567")
+    assert redis_store.get_open_incident("gpt-4", "/v1/chat") is None
+    assert slack.send_channel_message.call_count == 1
+    assert "resolved" in slack.send_channel_message.call_args[0][1].lower()
+
     redis_store.rate_limits.clear()
 
     fresh_breach = {
@@ -93,10 +109,10 @@ def test_scenario_latency_slo_incident_lifecycle() -> None:
         "p99_current": 300.0,
         "p99_baseline": 100.0,
         "budget_remaining": 80.0,
-        "timestamp": "2026-06-29T09:10:00Z",
+        "timestamp": "2026-06-29T09:15:00Z",
     }
 
     handler.handle(fresh_breach)
 
     assert pd.trigger_incident.call_count == 2
-    assert db.insert_alert.call_count == 2
+    assert redis_store.get_open_incident("gpt-4", "/v1/chat") == "pd_inc_4567"

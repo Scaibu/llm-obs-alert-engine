@@ -16,16 +16,10 @@ variable "service_name" {
   default     = "alert-engine"
 }
 
-variable "vpc_id" {
-  description = "VPC ID where service and datastores reside"
+variable "vpc_cidr" {
+  description = "VPC CIDR block for network architecture"
   type        = string
-  default     = ""
-}
-
-variable "subnet_ids" {
-  description = "Subnet IDs for compute and data workloads"
-  type        = list(string)
-  default     = []
+  default     = "10.0.0.0/16"
 }
 
 variable "min_replicas" {

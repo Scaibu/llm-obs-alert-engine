@@ -6,19 +6,20 @@ services:
       context: ../../..
       dockerfile: deploy/docker/service/Dockerfile
     container_name: alert-engine
+    restart: unless-stopped
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-llmobs-kafka:9092}
       KAFKA_CONSUMER_GROUP: alert-engine-group
       KAFKA_TOPICS: alerts.budget,alerts.cost.anomaly,llm.toxicity.flagged,alerts.quality.degradation,alerts.latency.slo,alerts.latency.ttft_regression
       REDIS_URL: ${REDIS_URL:-redis://:llmobs_redis_s3cret_2024@llmobs-redis:6379/0}
-      POSTGRES_HOST: ${POSTGRES_HOST:-alloydb}
+      POSTGRES_HOST: ${POSTGRES_HOST:-alert-engine-alloydb}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-ewma_db}
       SLACK_WEBHOOK_URL: http://localhost:8080/mock-slack
       PAGERDUTY_ROUTING_KEY: mock-pagerduty-routing-key
-      SERVICE_OWNERS_FILE_PATH: /app/service_owners.yaml
+      SERVICE_OWNERS_FILE_PATH: config/service_owners.yaml
       PROMETHEUS_METRICS_PORT: 9464
       HEALTH_CHECK_PORT: 8001
     ports:
@@ -33,12 +34,15 @@ services:
   alloydb:
     image: google/alloydbomni:15
     container_name: alert-engine-alloydb
+    restart: unless-stopped
     environment:
       ALLOYDB_USER: postgres
       ALLOYDB_PASSWORD: postgres
       ALLOYDB_DB: ewma_db
     ports:
       - "${PORT_ALERT_ALLOYDB:-31426}:5432"
+    volumes:
+      - alert_engine_alloydb_data:/var/lib/postgresql/data
     networks:
       - llmobs-network
     healthcheck:
@@ -47,6 +51,10 @@ services:
       timeout: 3s
       retries: 5
 
+volumes:
+  alert_engine_alloydb_data:
+    name: alert_engine_alloydb_data
+
 networks:
   llmobs-network:
-    external: true
+    name: llmobs-network

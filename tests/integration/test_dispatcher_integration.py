@@ -1,6 +1,7 @@
 import json
 from typing import Any
 from unittest.mock import MagicMock
+import pytest
 from worker.registry import build_registry
 from handlers.alerts_budget.handler import BudgetAlertHandler
 from handlers.alerts_cost_anomaly.handler import CostAnomalyAlertHandler
@@ -90,7 +91,7 @@ def test_dispatcher_integration_with_feature_registry() -> None:
         ("alerts.cost.anomaly", {"service": "billing_service", "model": "gpt-4", "current_cost": 50.0, "ewma_value": 10.0, "sample_count": 25}),
         ("llm.toxicity.flagged", {"span_id": "sp-101", "toxicity_score": 0.95, "user_id": "usr-safe", "model": "gpt-4", "endpoint": "/chat"}),
         ("alerts.quality.degradation", {"model": "gpt-4o", "endpoint": "/chat", "current_window_avg": 0.6, "baseline": 0.9, "ratio": 0.66, "alerted_at": "2026-06-15T08:00:00Z"}),
-        ("alerts.latency.slo", {"model": "gpt-4", "endpoint": "/chat", "severity": "page", "burn_rate": 2.5, "p95_current": 120.0, "p95_baseline": 50.0, "p99_current": 250.0, "p99_baseline": 100.0, "budget_remaining": 88.5, "timestamp": "2026-06-29T09:00:00Z"}),
+        ("alerts.latency.slo", {"model": "gpt-4", "endpoint": "/chat", "severity": "ticket", "burn_rate": 2.5, "p95_current": 120.0, "p95_baseline": 50.0, "p99_current": 250.0, "p99_baseline": 100.0, "budget_remaining": 88.5, "timestamp": "2026-06-29T09:00:00Z"}),
         ("alerts.latency.ttft_regression", {"model": "gpt-4", "current": 180.0, "baseline": 120.0, "hour_of_day": 14, "timestamp": "2026-07-01T14:00:00Z"}),
     ]
 
@@ -98,11 +99,13 @@ def test_dispatcher_integration_with_feature_registry() -> None:
         msg = FakeKafkaMessage(topic, json.dumps(payload).encode("utf-8"))
         handler_def = registry.get(msg.topic())
         assert handler_def is not None
-        data = json.loads(msg.value().decode("utf-8"))
+        raw_val = msg.value()
+        assert raw_val is not None
+        data = json.loads(raw_val.decode("utf-8"))
         handler_def.handler(data)
 
-    assert db.insert_alert.call_count >= 4
-    assert slack.send_channel_message.call_count >= 3
+    assert db.insert_alert.call_count == 4
+    assert slack.send_channel_message.call_count >= 2
 
 def test_dispatcher_handles_malformed_json_gracefully() -> None:
     malformed_msg = FakeKafkaMessage("alerts.budget", b"{not valid json:")

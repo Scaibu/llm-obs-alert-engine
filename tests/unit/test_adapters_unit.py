@@ -1,5 +1,6 @@
 import json
 import urllib.error
+from typing import Any
 from unittest.mock import MagicMock, patch
 import pytest
 from psycopg.errors import IntegrityError
@@ -11,12 +12,16 @@ from adapters.pagerduty.pagerduty_adapter import PagerDutyAdapter
 from adapters.metrics.prometheus_adapter import PrometheusAdapter
 from shared.errors.application_error import ValidationError
 
-class FakeIntegrityError(IntegrityError):
-    def __init__(self, msg: str, constraint_name: str) -> None:
+class MockIntegrityError(IntegrityError):
+    def __init__(self, msg: str, constraint: str) -> None:
         super().__init__(msg)
-        diag = MagicMock()
-        diag.constraint_name = constraint_name
-        self.diag = diag
+        self._constraint = constraint
+
+    @property
+    def diag(self) -> Any:
+        m = MagicMock()
+        m.constraint_name = self._constraint
+        return m
 
 def test_postgres_adapter_insert_alert_success() -> None:
     mock_cursor = MagicMock()
@@ -50,7 +55,7 @@ def test_postgres_adapter_insert_alert_success() -> None:
     mock_conn.commit.assert_called_once()
 
 def test_postgres_adapter_constraint_error_mapping() -> None:
-    exc = FakeIntegrityError("check constraint violation", "alert_history_alert_type_ck")
+    exc = MockIntegrityError("check constraint violation", "alert_history_alert_type_ck")
     mock_conn = MagicMock()
     mock_conn.__enter__.side_effect = exc
 

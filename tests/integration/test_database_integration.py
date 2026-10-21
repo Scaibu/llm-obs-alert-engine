@@ -1,20 +1,25 @@
+from typing import Any
 from unittest.mock import MagicMock, patch
 import pytest
-from psycopg.errors import CheckViolation, UniqueViolation, IntegrityError
+from psycopg.errors import IntegrityError
 
 from adapters.postgres.postgres_adapter import PostgresAdapter
 from shared.repositories.base_alert_repository import BaseAlertRepository
 from shared.errors.application_error import ValidationError, ConflictError
 
-class FakeIntegrityError(IntegrityError):
-    def __init__(self, msg: str, constraint_name: str) -> None:
+class MockIntegrityError(IntegrityError):
+    def __init__(self, msg: str, constraint: str) -> None:
         super().__init__(msg)
-        diag = MagicMock()
-        diag.constraint_name = constraint_name
-        self.diag = diag
+        self._constraint = constraint
+
+    @property
+    def diag(self) -> Any:
+        m = MagicMock()
+        m.constraint_name = self._constraint
+        return m
 
 def test_database_insert_alert_all_supported_types() -> None:
-    alert_types = [
+    alert_types: list[tuple[str, str | None, str | None, str | None, str | None, dict[str, Any]]] = [
         ("budget", "billing", "gpt-4", "usr-1", "blocked", {"threshold": 1.0}),
         ("cost_anomaly", "inference", "claude-3", None, "anomaly", {"ewma": 3.4}),
         ("toxicity", "chat", "llama-3", "usr-2", "flagged", {"score": 0.94}),
@@ -50,11 +55,11 @@ def test_database_constraint_mapping_integrations() -> None:
         ("alert_history_payload_ck", ValidationError),
         ("alert_history_delivery_latency_ms_ck", ValidationError),
         ("alert_history_public_id_ck", ValidationError),
-        ("alert_history_pkey", ConflictError),
+        ("alert_history_public_id_uk", ConflictError),
     ]
 
     for constraint_name, expected_error in test_cases:
-        exc = FakeIntegrityError(f"violates constraint {constraint_name}", constraint_name)
+        exc = MockIntegrityError(f"violates constraint {constraint_name}", constraint_name)
         mock_conn = MagicMock()
         mock_conn.__enter__.side_effect = exc
 
