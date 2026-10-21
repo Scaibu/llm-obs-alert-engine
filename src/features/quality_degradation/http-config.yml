@@ -1,0 +1,3 @@
+endpoint: /alerts/quality-degradation
+method: POST
+timeout_ms: 5000

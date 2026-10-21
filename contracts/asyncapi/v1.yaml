@@ -1,0 +1,36 @@
+asyncapi: 2.6.0
+info:
+  title: Alert Engine AsyncAPI Contracts
+  version: "1.0.0"
+  description: Authoritative event streaming contracts consumed by alert-engine
+channels:
+  alerts.budget:
+    subscribe:
+      operationId: consumeBudgetAlerts
+      message:
+        $ref: "../events/alerts.budget.yaml#/channels/alerts.budget/subscribe/message"
+  alerts.cost.anomaly:
+    subscribe:
+      operationId: consumeCostAnomalyAlerts
+      message:
+        $ref: "../events/alerts.cost.anomaly.yaml#/channels/alerts.cost.anomaly/subscribe/message"
+  alerts.latency.slo:
+    subscribe:
+      operationId: consumeLatencySloAlerts
+      message:
+        $ref: "../events/alerts.latency.slo.yaml#/channels/alerts.latency.slo/subscribe/message"
+  alerts.latency.ttft_regression:
+    subscribe:
+      operationId: consumeLatencyTtftRegressionAlerts
+      message:
+        $ref: "../events/alerts.latency.ttft_regression.yaml#/channels/alerts.latency.ttft_regression/subscribe/message"
+  alerts.quality.degradation:
+    subscribe:
+      operationId: consumeQualityDegradationAlerts
+      message:
+        $ref: "../events/alerts.quality.degradation.yaml#/channels/alerts.quality.degradation/subscribe/message"
+  llm.toxicity.flagged:
+    subscribe:
+      operationId: consumeToxicityFlaggedAlerts
+      message:
+        $ref: "../events/llm.toxicity.flagged.yaml#/channels/llm.toxicity.flagged/subscribe/message"

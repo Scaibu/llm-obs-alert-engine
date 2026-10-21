@@ -34,6 +34,15 @@ class MockRedisPort:
         self.calls.append({"key": key, "ttl": ttl_seconds})
         return self.allowed
 
+    def get_open_incident(self, model: str, endpoint: str) -> str | None:
+        return None
+
+    def set_open_incident(self, model: str, endpoint: str, incident_id: str, ttl: int) -> None:
+        pass
+
+    def delete_open_incident(self, model: str, endpoint: str) -> None:
+        pass
+
 class MockSlackPort:
     def __init__(self) -> None:
         self.channel_calls: list[dict] = []
@@ -61,6 +70,9 @@ class MockPagerDutyPort:
             "source": source,
             "custom_details": custom_details
         })
+
+    def resolve_incident(self, dedup_key: str) -> None:
+        pass
 
 class MockMetricsPort:
     def __init__(self) -> None:

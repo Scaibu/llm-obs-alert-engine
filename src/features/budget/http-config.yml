@@ -1,0 +1,3 @@
+endpoint: /alerts/budget
+method: POST
+timeout_ms: 5000

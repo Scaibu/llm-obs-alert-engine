@@ -12,6 +12,15 @@ class MockRedisPort:
         self.calls.append({"key": key, "ttl": ttl_seconds})
         return self.allowed
 
+    def get_open_incident(self, model: str, endpoint: str) -> str | None:
+        return None
+
+    def set_open_incident(self, model: str, endpoint: str, incident_id: str, ttl: int) -> None:
+        pass
+
+    def delete_open_incident(self, model: str, endpoint: str) -> None:
+        pass
+
 
 class MockSlackPort:
     def __init__(self) -> None:

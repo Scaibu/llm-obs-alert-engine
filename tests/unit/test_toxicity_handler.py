@@ -10,12 +10,24 @@ class MockRedisPort:
         self.calls.append({"key": key, "ttl": ttl_seconds})
         return self.allowed
 
+    def get_open_incident(self, model: str, endpoint: str) -> str | None:
+        return None
+
+    def set_open_incident(self, model: str, endpoint: str, incident_id: str, ttl: int) -> None:
+        pass
+
+    def delete_open_incident(self, model: str, endpoint: str) -> None:
+        pass
+
 class MockSlackPort:
     def __init__(self) -> None:
         self.channel_calls: list[dict] = []
 
     def send_channel_message(self, channel: str, text: str) -> None:
         self.channel_calls.append({"channel": channel, "text": text})
+
+    def send_direct_message(self, user: str, text: str) -> None:
+        pass
 
 def test_toxicity_alert_success() -> None:
     redis = MockRedisPort(allowed=True)

@@ -1,4 +1,3 @@
-from typing import Protocol
+from ports.metrics_port import MetricsPort
 
-class MetricsPort(Protocol):
-    def record_delivery_latency(self, alert_type: str, severity: str, latency_ms: float) -> None: ...
+__all__ = ["MetricsPort"]

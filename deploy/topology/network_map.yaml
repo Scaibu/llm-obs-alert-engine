@@ -1,0 +1,34 @@
+version: "1.0"
+service_name: "alert-engine"
+description: "Network topology and communication contracts for alert-engine"
+
+self:
+  service_name: "alert-engine"
+  protocol: "event-worker"
+  ports:
+    health: 8001
+    metrics: 9464
+
+dependencies:
+  stateful:
+    database:
+      type: "postgresql"
+      host: "alloydb.llmobs.internal"
+      port: 5432
+      database_name: "ewma_db"
+    cache:
+      type: "redis"
+      host: "redis.llmobs.internal"
+      port: 6379
+    kafka:
+      type: "kafka"
+      host: "kafka.llmobs.internal"
+      port: 9092
+      topics:
+        inbound:
+          - "alerts.budget"
+          - "alerts.cost.anomaly"
+          - "llm.toxicity.flagged"
+          - "alerts.quality.degradation"
+          - "alerts.latency.slo"
+          - "alerts.latency.ttft_regression"

@@ -1,0 +1,12 @@
+version: "1.0"
+database: alert_engine
+engine: postgresql
+primary:
+  host: ${POSTGRES_HOST:-localhost}
+  port: ${POSTGRES_PORT:-5439}
+  pool_size: 10
+  max_overflow: 20
+read_replicas: []
+replication:
+  mode: synchronous
+  quorum: 1

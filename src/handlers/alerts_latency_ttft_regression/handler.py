@@ -1,10 +1,14 @@
 import logging
 from typing import Any
-from shared.ports.db_port import DbPort
-from shared.ports.redis_port import RedisPort
-from shared.ports.slack_port import SlackPort
-from shared.ports.metrics_port import MetricsPort
-from features.latency_ttft_regression.index import LatencyTtftRegressionService, LatencyTtftRegressionAlertPayload
+from ports.db_port import DbPort
+from ports.redis_port import RedisPort
+from ports.slack_port import SlackPort
+from ports.metrics_port import MetricsPort
+from features.latency_ttft_regression.index import (
+    LatencyTtftRegressionService,
+    LatencyTtftRegressionAlertPayload,
+    LatencyTtftRegressionSchemaMapper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +28,6 @@ class LatencyTtftRegressionAlertHandler:
         )
 
     def handle(self, payload: dict[str, Any]) -> None:
-        model = payload.get("model") or "unknown"
-        current = payload.get("current", 0.0)
-        baseline = payload.get("baseline", 0.0)
-        hour_of_day = payload.get("hour_of_day", 0)
-        timestamp = payload.get("timestamp")
-
-        feature_payload = LatencyTtftRegressionAlertPayload(
-            model=model,
-            current=current,
-            baseline=baseline,
-            hour_of_day=hour_of_day,
-            timestamp=timestamp
-        )
-
+        feature_payload = LatencyTtftRegressionSchemaMapper.from_api(payload)
         self.service.process_alert(feature_payload)
+

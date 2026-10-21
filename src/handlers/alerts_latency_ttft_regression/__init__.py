@@ -1,1 +1,1 @@
-# Latency TTFT Regression handler package
+from __future__ import annotations

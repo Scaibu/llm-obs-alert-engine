@@ -1,0 +1,6 @@
+registry:
+  url: "ghcr.io/scaibu"
+  namespace: "llm-obs"
+  repository: "alert-engine"
+  imagePullPolicy: "IfNotPresent"
+  authSecretName: "ghcr-registry-secret"

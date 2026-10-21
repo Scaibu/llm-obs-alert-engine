@@ -5,5 +5,9 @@ workers:
     topics:
       - alerts.budget
       - alerts.cost.anomaly
+      - llm.toxicity.flagged
+      - alerts.quality.degradation
+      - alerts.latency.slo
+      - alerts.latency.ttft_regression
     owner: "@infra-alerts-team"
     stage: 1

@@ -15,8 +15,9 @@ def main() -> None:
     action = sys.argv[1]
     config = load_config()
     
-    migrations_dir = base_dir / "database" / "migrations"
-    lock_file = migrations_dir / "schema.lock"
+    sql_dir = base_dir / "database" / "migrations" / "sql"
+    migrations_dir = sql_dir if sql_dir.exists() else base_dir / "database" / "migrations"
+    lock_file = base_dir / "database" / "schema.lock"
     
     current_version = 0
     if lock_file.exists():

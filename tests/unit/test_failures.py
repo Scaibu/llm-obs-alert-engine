@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from handlers.alerts_budget.handler import BudgetAlertHandler
 from handlers.alerts_cost_anomaly.handler import CostAnomalyAlertHandler
-from worker.index import main
+from main import main
 
 class DummyException(Exception):
     pass
@@ -33,6 +33,15 @@ class MockRedisPort:
         self.calls.append({"key": key, "ttl": ttl_seconds})
         return self.allowed
 
+    def get_open_incident(self, model: str, endpoint: str) -> str | None:
+        return None
+
+    def set_open_incident(self, model: str, endpoint: str, incident_id: str, ttl: int) -> None:
+        pass
+
+    def delete_open_incident(self, model: str, endpoint: str) -> None:
+        pass
+
 class MockSlackPort:
     def __init__(self, raise_exc: bool = False) -> None:
         self.raise_exc = raise_exc
@@ -52,10 +61,14 @@ class MockPagerDutyPort:
         self.raise_exc = raise_exc
         self.calls: list[dict] = []
 
-    def trigger_incident(self, *args, **kwargs) -> None:
+    def trigger_incident(self, *args, **kwargs) -> str | None:
         if self.raise_exc:
             raise DummyException("PagerDuty API failed")
         self.calls.append({"args": args, "kwargs": kwargs})
+        return None
+
+    def resolve_incident(self, dedup_key: str) -> None:
+        pass
 
 class MockMetricsPort:
     def record_delivery_latency(self, *args, **kwargs) -> None:
@@ -194,14 +207,14 @@ def test_consumer_loop_resilience() -> None:
     mock_consumer_instance = MagicMock()
     mock_consumer_instance.poll.side_effect = lambda timeout: next(iterator)
 
-    with patch("worker.index.Consumer", return_value=mock_consumer_instance), \
-         patch("worker.index.PostgresAdapter") as mock_pg, \
-         patch("worker.index.RedisAdapter") as mock_redis, \
-         patch("worker.index.SlackAdapter") as mock_slack, \
-         patch("worker.index.PagerDutyAdapter") as mock_pd, \
-         patch("worker.index.PrometheusAdapter") as mock_prom, \
-         patch("worker.index.start_http_server"), \
-         patch("worker.index._start_health_server"), \
+    with patch("main.Consumer", return_value=mock_consumer_instance), \
+         patch("main.PostgresAdapter") as mock_pg, \
+         patch("main.RedisAdapter") as mock_redis, \
+         patch("main.SlackAdapter") as mock_slack, \
+         patch("main.PagerDutyAdapter") as mock_pd, \
+         patch("main.PrometheusAdapter") as mock_prom, \
+         patch("main.start_http_server"), \
+         patch("main._start_health_server"), \
          pytest.raises(StopIteration):
         
         main()

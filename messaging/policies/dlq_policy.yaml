@@ -1,0 +1,6 @@
+retry:
+  max_attempts: 3
+  backoff_multiplier: 2.0
+  initial_interval_ms: 1000
+dlq:
+  topic: alerts.dlq

@@ -1,0 +1,88 @@
+feature: toxicity
+version: 1.0.0
+owner: "@infra-alerts-team"
+domain: llm.toxicity.flagged
+entity:
+  name: alert_history
+  owner: reliability-platform
+  fields:
+    - name: id
+      type: bigint
+      null: no
+      default: generated_identity
+      constraint: PK, UNIQUE(tenant_id, id), immutable
+    - name: public_id
+      type: varchar(64)
+      null: no
+      default: generated
+      constraint: UNIQUE, immutable, format 'alt_' + 26 chars
+    - name: tenant_id
+      type: varchar(64)
+      null: no
+      default: "default"
+      constraint: immutable, partition_key
+    - name: source
+      type: varchar(64)
+      null: no
+      default: "alert-engine"
+      constraint: length 1..64
+    - name: external_id
+      type: varchar(128)
+      null: no
+      default: generated
+      constraint: UNIQUE(tenant_id, source, external_id)
+    - name: correlation_id
+      type: varchar(64)
+      null: no
+      default: generated
+      constraint: immutable, causation_trace
+    - name: alert_type
+      type: varchar(50)
+      null: no
+      constraint: CHECK in enum
+    - name: service
+      type: varchar(255)
+      null: yes
+      normalize: trim
+    - name: model
+      type: varchar(255)
+      null: yes
+      normalize: trim
+    - name: user_id
+      type: varchar(255)
+      null: yes
+      normalize: trim
+    - name: event_type
+      type: varchar(50)
+      null: yes
+      normalize: trim
+    - name: payload
+      type: jsonb
+      null: no
+      constraint: CHECK jsonb_typeof(payload) = 'object'
+    - name: delivery_latency_ms
+      type: integer
+      null: yes
+      constraint: CHECK >= 0
+    - name: version
+      type: bigint
+      null: no
+      default: 1
+      constraint: CHECK >= 1
+    - name: created_at
+      type: timestamptz
+      null: no
+      default: CURRENT_TIMESTAMP
+    - name: updated_at
+      type: timestamptz
+      null: no
+      default: CURRENT_TIMESTAMP
+    - name: deleted_at
+      type: timestamptz
+      null: yes
+contracts:
+  payload: ToxicityPayload
+  result: ToxicityResult
+rate_limit:
+  ttl_seconds: 300
+slack_channel: "#llm-safety-review"

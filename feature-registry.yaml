@@ -45,3 +45,24 @@ features:
     depends_on_features: []
     depends_on_packages: []
 
+  - name: quality_degradation_routing
+    status: active
+    contract: contracts/events/alerts.quality.degradation.yaml
+    contract_version: v1
+    owner: "@infra-alerts-team"
+    added: 2026-07-01
+    flags: []
+    migrations: []
+    depends_on_features: []
+    depends_on_packages: []
+
+  - name: toxicity_flagged_routing
+    status: active
+    contract: contracts/events/llm.toxicity.flagged.yaml
+    contract_version: v1
+    owner: "@infra-alerts-team"
+    added: 2026-07-01
+    flags: []
+    migrations: []
+    depends_on_features: []
+    depends_on_packages: []

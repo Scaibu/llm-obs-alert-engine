@@ -1,0 +1,3 @@
+from features.quality_degradation.infrastructure.ports.quality_degradation_repository_port import QualityDegradationRepositoryPort
+
+__all__ = ["QualityDegradationRepositoryPort"]

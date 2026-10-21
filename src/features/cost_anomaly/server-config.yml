@@ -1,0 +1,3 @@
+workers: 1
+concurrency: 10
+queue_size: 100

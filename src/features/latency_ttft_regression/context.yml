@@ -1,0 +1,96 @@
+feature: latency_ttft_regression
+architecture: hexagonal_backend
+contract_version: "2.1"
+domain:
+  bounded_context: alert-engine
+  aggregate_root: LatencyTtftRegressionRecord
+entity:
+  name: alert_history
+  owner: reliability-platform
+  fields:
+    - name: id
+      type: bigint
+      null: no
+      default: generated_identity
+      constraint: PK, UNIQUE(tenant_id, id), immutable
+    - name: public_id
+      type: varchar(64)
+      null: no
+      default: generated
+      constraint: UNIQUE, immutable, format 'alt_' + 26 chars
+    - name: tenant_id
+      type: varchar(64)
+      null: no
+      default: "default"
+      constraint: immutable, partition_key
+    - name: source
+      type: varchar(64)
+      null: no
+      default: "alert-engine"
+      constraint: length 1..64
+    - name: external_id
+      type: varchar(128)
+      null: no
+      default: generated
+      constraint: UNIQUE(tenant_id, source, external_id)
+    - name: correlation_id
+      type: varchar(64)
+      null: no
+      default: generated
+      constraint: immutable, causation_trace
+    - name: alert_type
+      type: varchar(50)
+      null: no
+      constraint: CHECK in enum
+    - name: service
+      type: varchar(255)
+      null: yes
+      normalize: trim
+    - name: model
+      type: varchar(255)
+      null: yes
+      normalize: trim
+    - name: user_id
+      type: varchar(255)
+      null: yes
+      normalize: trim
+    - name: event_type
+      type: varchar(50)
+      null: yes
+      normalize: trim
+    - name: payload
+      type: jsonb
+      null: no
+      constraint: CHECK jsonb_typeof(payload) = 'object'
+    - name: delivery_latency_ms
+      type: integer
+      null: yes
+      constraint: CHECK >= 0
+    - name: version
+      type: bigint
+      null: no
+      default: 1
+      constraint: CHECK >= 1
+    - name: created_at
+      type: timestamptz
+      null: no
+      default: CURRENT_TIMESTAMP
+    - name: updated_at
+      type: timestamptz
+      null: no
+      default: CURRENT_TIMESTAMP
+    - name: deleted_at
+      type: timestamptz
+      null: yes
+invariants:
+  - "current and baseline must be finite non-negative numbers"
+  - "hour_of_day must be bounded in [0, 23]"
+  - "rate limit key rate_limit:latency_ttft_regression:{model}:{hour_of_day} with 21600 seconds TTL (6 hours)"
+  - "persists alert record to alert_history table"
+  - "dispatches formatted warning message to Slack channel #llm-latency-alerts"
+ports:
+  - shared.ports.db_port.DbPort
+  - shared.ports.redis_port.RedisPort
+  - shared.ports.slack_port.SlackPort
+  - shared.ports.metrics_port.MetricsPort
+  - features.latency_ttft_regression.infrastructure.ports.latency_ttft_regression_repository_port.LatencyTtftRegressionRepositoryPort

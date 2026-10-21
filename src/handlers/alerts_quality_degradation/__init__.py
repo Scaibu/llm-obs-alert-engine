@@ -1,1 +1,1 @@
-# alerts_quality_degradation handler package
+from __future__ import annotations

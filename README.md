@@ -91,10 +91,7 @@ Upon consuming events, the engine performs the following actions:
 │   │   │   └── handler.py
 │   │   └── alerts_toxicity/
 │   │       └── handler.py
-│   ├── infra/
-
-
-│   │   └── adapters/
+│   ├── adapters/
 │   │       ├── metrics/
 │   │       │   └── prometheus_adapter.py
 │   │       ├── pagerduty/
@@ -413,10 +410,10 @@ print(f"Connecting to Kafka at {config.kafka_bootstrap_servers}")
 
 #### Triggering Handlers manually:
 ```python
-from src.infra.adapters.postgres.postgres_adapter import PostgresAdapter
-from src.infra.adapters.redis.redis_adapter import RedisAdapter
-from src.infra.adapters.slack.slack_adapter import SlackAdapter
-from src.infra.adapters.metrics.prometheus_adapter import PrometheusAdapter
+from src.adapters.postgres.postgres_adapter import PostgresAdapter
+from src.adapters.redis.redis_adapter import RedisAdapter
+from src.adapters.slack.slack_adapter import SlackAdapter
+from src.adapters.metrics.prometheus_adapter import PrometheusAdapter
 from src.handlers.alerts_budget.handler import BudgetAlertHandler
 
 # Initialize the adapter ports

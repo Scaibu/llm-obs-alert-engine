@@ -1,0 +1,97 @@
+feature: latency_slo
+architecture: hexagonal_backend
+contract_version: "2.1"
+domain:
+  bounded_context: alert-engine
+  aggregate_root: LatencySloAlertRecord
+entity:
+  name: alert_history
+  owner: reliability-platform
+  fields:
+    - name: id
+      type: bigint
+      null: no
+      default: generated_identity
+      constraint: PK, UNIQUE(tenant_id, id), immutable
+    - name: public_id
+      type: varchar(64)
+      null: no
+      default: generated
+      constraint: UNIQUE, immutable, format 'alt_' + 26 chars
+    - name: tenant_id
+      type: varchar(64)
+      null: no
+      default: "default"
+      constraint: immutable, partition_key
+    - name: source
+      type: varchar(64)
+      null: no
+      default: "alert-engine"
+      constraint: length 1..64
+    - name: external_id
+      type: varchar(128)
+      null: no
+      default: generated
+      constraint: UNIQUE(tenant_id, source, external_id)
+    - name: correlation_id
+      type: varchar(64)
+      null: no
+      default: generated
+      constraint: immutable, causation_trace
+    - name: alert_type
+      type: varchar(50)
+      null: no
+      constraint: CHECK in enum
+    - name: service
+      type: varchar(255)
+      null: yes
+      normalize: trim
+    - name: model
+      type: varchar(255)
+      null: yes
+      normalize: trim
+    - name: user_id
+      type: varchar(255)
+      null: yes
+      normalize: trim
+    - name: event_type
+      type: varchar(50)
+      null: yes
+      normalize: trim
+    - name: payload
+      type: jsonb
+      null: no
+      constraint: CHECK jsonb_typeof(payload) = 'object'
+    - name: delivery_latency_ms
+      type: integer
+      null: yes
+      constraint: CHECK >= 0
+    - name: version
+      type: bigint
+      null: no
+      default: 1
+      constraint: CHECK >= 1
+    - name: created_at
+      type: timestamptz
+      null: no
+      default: CURRENT_TIMESTAMP
+    - name: updated_at
+      type: timestamptz
+      null: no
+      default: CURRENT_TIMESTAMP
+    - name: deleted_at
+      type: timestamptz
+      null: yes
+invariants:
+  - "burn_rate, p95_current, p95_baseline, p99_current, p99_baseline, budget_remaining must be finite numbers"
+  - "severity must be one of: page, slack, ticket, or auto-resolve (None/empty)"
+  - "page alerts must be rate limited to 1 per (model, endpoint) per 15 minutes (900 seconds)"
+  - "auto-resolve closes open PagerDuty incident and notifies Slack channel #llm-latency-alerts"
+  - "ticket alerts persist structured payload to alert_history in PostgreSQL"
+ports:
+  - shared.ports.db_port.DbPort
+  - shared.ports.redis_port.RedisPort
+  - shared.ports.slack_port.SlackPort
+  - shared.ports.pagerduty_port.PagerDutyPort
+  - shared.ports.metrics_port.MetricsPort
+  - features.latency_slo.infrastructure.ports.latency_slo_repository_port.LatencySloRepositoryPort

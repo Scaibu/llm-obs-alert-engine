@@ -1,0 +1,25 @@
+topics:
+  - name: alerts.budget
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000
+  - name: alerts.cost.anomaly
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000
+  - name: llm.toxicity.flagged
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000
+  - name: alerts.quality.degradation
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000
+  - name: alerts.latency.slo
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000
+  - name: alerts.latency.ttft_regression
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000
