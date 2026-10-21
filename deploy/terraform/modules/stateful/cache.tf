@@ -1,30 +1,22 @@
-resource "aws_elasticache_subnet_group" "redis" {
-  name       = "${var.environment}-${var.service_name}-redis-subnet-group"
-  subnet_ids = var.subnet_ids
+resource "google_redis_instance" "cache" {
+  name           = "${var.environment}-${var.service_name}-cache"
+  memory_size_gb = 1
+  location_id    = "${var.region}-a"
+  region         = var.region
 
-  tags = {
-    Name        = "${var.environment}-${var.service_name}-redis-subnet-group"
-    Environment = var.environment
-  }
+  authorized_network = var.network_id
+  connect_mode       = "PRIVATE_SERVICE_ACCESS"
+
+  redis_version     = "REDIS_7_0"
+  display_name      = "Alert Engine Redis Ledger"
+  auth_enabled      = true
+  transit_encryption_mode = "DISABLED"
 }
 
-resource "aws_elasticache_cluster" "redis" {
-  cluster_id           = "${var.environment}-${var.service_name}-cache"
-  engine               = "redis"
-  node_type            = "cache.t4g.medium"
-  num_cache_nodes      = 1
-  parameter_group_name = "default.redis7"
-  port                 = 6379
-  subnet_group_name    = aws_elasticache_subnet_group.redis.name
-  security_group_ids   = var.security_group_id != "" ? [var.security_group_id] : []
-
-  tags = {
-    Environment = var.environment
-    Service     = var.service_name
-    ManagedBy   = "Terraform"
-  }
+output "redis_host" {
+  value = google_redis_instance.cache.host
 }
 
-output "cache_endpoint" {
-  value = aws_elasticache_cluster.redis.cache_nodes[0].address
+output "redis_port" {
+  value = google_redis_instance.cache.port
 }

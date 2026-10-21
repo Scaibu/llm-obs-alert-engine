@@ -1,80 +1,44 @@
-resource "aws_vpc" "main" {
-  cidr_block           = var.vpc_cidr
-  enable_dns_support   = true
-  enable_dns_hostnames = true
+resource "google_compute_network" "vpc" {
+  name                    = "${var.environment}-llmobs-vpc"
+  auto_create_subnetworks = false
+}
 
-  tags = {
-    Name        = "${var.environment}-llmobs-vpc"
-    Environment = var.environment
-    ManagedBy   = "Terraform"
+resource "google_compute_subnetwork" "subnet_gke" {
+  name                     = "${var.environment}-gke-subnet"
+  ip_cidr_range            = "10.0.1.0/24"
+  region                   = var.region
+  network                  = google_compute_network.vpc.id
+  private_ip_google_access = true
+
+  secondary_ip_range {
+    range_name    = "gke-pods"
+    ip_cidr_range = "10.48.0.0/14"
+  }
+
+  secondary_ip_range {
+    range_name    = "gke-services"
+    ip_cidr_range = "10.52.0.0/20"
   }
 }
 
-resource "aws_internet_gateway" "gw" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name        = "${var.environment}-llmobs-igw"
-    Environment = var.environment
-  }
+resource "google_compute_subnetwork" "subnet_data" {
+  name                     = "${var.environment}-data-subnet"
+  ip_cidr_range            = "10.0.11.0/24"
+  region                   = var.region
+  network                  = google_compute_network.vpc.id
+  private_ip_google_access = true
 }
 
-resource "aws_subnet" "public" {
-  count                   = length(var.public_subnet_cidrs)
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = var.public_subnet_cidrs[count.index]
-  availability_zone       = var.availability_zones[count.index]
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name        = "${var.environment}-public-subnet-${count.index + 1}"
-    Environment = var.environment
-    Type        = "public"
-  }
+resource "google_compute_router" "router" {
+  name    = "${var.environment}-nat-router"
+  region  = var.region
+  network = google_compute_network.vpc.id
 }
 
-resource "aws_subnet" "private" {
-  count             = length(var.private_subnet_cidrs)
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = var.private_subnet_cidrs[count.index]
-  availability_zone = var.availability_zones[count.index]
-
-  tags = {
-    Name                              = "${var.environment}-private-subnet-${count.index + 1}"
-    Environment                       = var.environment
-    Type                              = "private"
-    "kubernetes.io/role/internal-elb" = "1"
-  }
-}
-
-resource "aws_subnet" "data" {
-  count             = length(var.data_subnet_cidrs)
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = var.data_subnet_cidrs[count.index]
-  availability_zone = var.availability_zones[count.index]
-
-  tags = {
-    Name        = "${var.environment}-data-subnet-${count.index + 1}"
-    Environment = var.environment
-    Type        = "data"
-  }
-}
-
-resource "aws_eip" "nat" {
-  domain = "vpc"
-
-  tags = {
-    Name        = "${var.environment}-nat-eip"
-    Environment = var.environment
-  }
-}
-
-resource "aws_nat_gateway" "nat" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[0].id
-
-  tags = {
-    Name        = "${var.environment}-nat-gw"
-    Environment = var.environment
-  }
+resource "google_compute_router_nat" "nat" {
+  name                               = "${var.environment}-nat-gw"
+  router                             = google_compute_router.router.name
+  region                             = var.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }

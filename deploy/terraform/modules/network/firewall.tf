@@ -1,82 +1,38 @@
-resource "aws_network_acl" "private" {
-  vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.private[*].id
+resource "google_compute_firewall" "allow_internal_health_metrics" {
+  name    = "${var.environment}-allow-health-metrics"
+  network = google_compute_network.vpc.name
 
-  egress {
-    protocol   = "-1"
-    rule_no    = 100
-    action     = "allow"
-    cidr_block = "0.0.0.0/0"
-    from_port  = 0
-    to_port    = 0
+  allow {
+    protocol = "tcp"
+    ports    = ["8001", "9464"]
   }
 
-  ingress {
-    protocol   = "tcp"
-    rule_no    = 100
-    action     = "allow"
-    cidr_block = var.vpc_cidr
-    from_port  = 0
-    to_port    = 65535
-  }
-
-  ingress {
-    protocol   = "tcp"
-    rule_no    = 110
-    action     = "allow"
-    cidr_block = "0.0.0.0/0"
-    from_port  = 1024
-    to_port    = 65535
-  }
-
-  tags = {
-    Name        = "${var.environment}-private-nacl"
-    Environment = var.environment
-  }
+  source_ranges = ["10.0.0.0/16", "10.48.0.0/14"]
+  target_tags   = ["alert-engine"]
 }
 
-resource "aws_network_acl" "data" {
-  vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.data[*].id
+resource "google_compute_firewall" "allow_data_access" {
+  name    = "${var.environment}-allow-data-access"
+  network = google_compute_network.vpc.name
 
-  ingress {
-    protocol   = "tcp"
-    rule_no    = 100
-    action     = "allow"
-    cidr_block = var.vpc_cidr
-    from_port  = 5432
-    to_port    = 5432
+  allow {
+    protocol = "tcp"
+    ports    = ["5432", "6379", "9092", "9093", "9094"]
   }
 
-  ingress {
-    protocol   = "tcp"
-    rule_no    = 110
-    action     = "allow"
-    cidr_block = var.vpc_cidr
-    from_port  = 6379
-    to_port    = 6379
+  source_tags = ["alert-engine"]
+  target_tags = ["data-tier"]
+}
+
+resource "google_compute_firewall" "deny_all_external_data" {
+  name    = "${var.environment}-deny-external-data"
+  network = google_compute_network.vpc.name
+
+  deny {
+    protocol = "all"
   }
 
-  ingress {
-    protocol   = "tcp"
-    rule_no    = 120
-    action     = "allow"
-    cidr_block = var.vpc_cidr
-    from_port  = 9092
-    to_port    = 9098
-  }
-
-  egress {
-    protocol   = "tcp"
-    rule_no    = 100
-    action     = "allow"
-    cidr_block = var.vpc_cidr
-    from_port  = 1024
-    to_port    = 65535
-  }
-
-  tags = {
-    Name        = "${var.environment}-data-nacl-firewall"
-    Environment = var.environment
-  }
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["data-tier"]
+  priority      = 2000
 }

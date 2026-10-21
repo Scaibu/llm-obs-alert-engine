@@ -1,19 +1,15 @@
-output "vpc_id" {
-  value = aws_vpc.main.id
+output "network_id" {
+  value = google_compute_network.vpc.id
 }
 
-output "vpc_cidr" {
-  value = aws_vpc.main.cidr_block
+output "network_name" {
+  value = google_compute_network.vpc.name
 }
 
-output "public_subnet_ids" {
-  value = aws_subnet.public[*].id
+output "gke_subnet_id" {
+  value = google_compute_subnetwork.subnet_gke.id
 }
 
-output "private_subnet_ids" {
-  value = aws_subnet.private[*].id
-}
-
-output "data_subnet_ids" {
-  value = aws_subnet.data[*].id
+output "data_subnet_id" {
+  value = google_compute_subnetwork.subnet_data.id
 }

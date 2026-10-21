@@ -1,37 +1,39 @@
-resource "aws_msk_cluster" "kafka" {
-  cluster_name           = "${var.environment}-llmobs-kafka"
-  kafka_version          = "3.5.1"
-  number_of_broker_nodes = var.kafka_broker_count
+# Google Cloud Managed Service for Apache Kafka / Compute Engine Kafka Cluster
+resource "google_compute_instance_template" "kafka_template" {
+  name_prefix  = "${var.environment}-kafka-template-"
+  machine_type = "e2-standard-2"
+  region       = var.region
 
-  broker_node_group_info {
-    instance_type   = var.kafka_instance_type
-    client_subnets  = var.subnet_ids
-    security_groups = [var.security_group_id]
-    storage_info {
-      ebs_storage_info {
-        volume_size = 100
-      }
-    }
+  disk {
+    source_image = "debian-cloud/debian-11"
+    auto_delete  = true
+    boot         = true
+    disk_size_gb = 50
   }
 
-  encryption_info {
-    encryption_in_transit {
-      client_broker = "TLS_PLAINTEXT"
-      in_cluster    = true
-    }
+  network_interface {
+    network    = var.network_id
+    subnetwork = var.data_subnet_id
   }
 
-  tags = {
-    Environment = var.environment
-    Service     = "shared-messaging"
-    ManagedBy   = "Terraform"
+  tags = ["data-tier", "kafka-broker"]
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
-output "kafka_bootstrap_brokers" {
-  value = aws_msk_cluster.kafka.bootstrap_brokers
+resource "google_compute_region_instance_group_manager" "kafka_cluster" {
+  name               = "${var.environment}-kafka-cluster"
+  base_instance_name = "kafka-broker"
+  region             = var.region
+  target_size        = 3
+
+  version {
+    instance_template = google_compute_instance_template.kafka_template.id
+  }
 }
 
-output "kafka_arn" {
-  value = aws_msk_cluster.kafka.arn
+output "kafka_cluster_name" {
+  value = google_compute_region_instance_group_manager.kafka_cluster.name
 }

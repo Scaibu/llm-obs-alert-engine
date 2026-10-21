@@ -32,8 +32,8 @@ Historically, across the early iterations of this monorepo, microservices lacked
 - **Impact**: Port collision conflicts (`EADDRINUSE`) routinely broke integration test pipelines and halted developer workflows. In multi-container polyglot integration environments, worker instances attached to disjoint bridge networks, creating partitioned split-brain states where half of the consumers consumed from local mock brokers while another set attempted connections to staging brokers. Critical budget exhaustion events were dropped silently, resulting in over $14,000 of runaway LLM API consumption before manual intervention.
 
 #### 2. The "Over-Privileged Identity & Missing Network Firewall" Failure (Security & Data Exfiltration Risk)
-- **What Happened**: Container workloads initially executed with default Linux root privileges (`UID 0`) and inherited broad AWS IAM roles (`AdministratorAccess` or unconstrained `AmazonEC2FullAccess`). Within the cloud VPC, internal relational databases (`5432`), Redis instances (`6379`), and unauthenticated Kafka plaintext listeners (`9092`) resided in flat, shared subnets alongside public-facing REST endpoints without Network Access Control Lists (NACLs) or east-west firewall rules.
-- **Impact**: Security vulnerability scanning revealed that an SSRF or Remote Code Execution vulnerability in any upstream API gateway could allow attackers to traverse the flat network, query the AWS instance metadata service (`http://169.254.169.254/latest/meta-data/iam/security-credentials/`), harvest temporary STS tokens, and exfiltrate unencrypted database credentials directly from memory.
+- **What Happened**: Container workloads initially executed with default Linux root privileges (`UID 0`) and inherited broad cloud IAM roles (`Owner` or unconstrained compute admin roles). Within the cloud VPC, internal relational databases (`5432`), Redis instances (`6379`), and unauthenticated Kafka plaintext listeners (`9092`) resided in flat, shared subnets alongside public-facing REST endpoints without VPC firewall rules or private service access boundaries.
+- **Impact**: Security vulnerability scanning revealed that an SSRF or Remote Code Execution vulnerability in any upstream API gateway could allow attackers to traverse the flat network, query the Google Cloud instance metadata server (`http://metadata.google.internal/computeMetadata/v1/`), harvest temporary access tokens, and exfiltrate unencrypted database credentials directly from memory.
 
 #### 3. The "Stateful Crash & Silent Eviction" Failure (Missing Restart Policies & Ephemeral Storage)
 - **What Happened**: Docker Compose manifests and early Kubernetes pod specs lacked automated container restart policies (`restart: "no"`) and omitted persistent volume mounts for stateful datastores (`google/alloydbomni`, `redis:7-alpine`, `confluentinc/cp-kafka`).
@@ -55,24 +55,24 @@ To permanently resolve these failure modes, we adopted an immutable, multi-targe
      - `deploy/k8s/`: Production-grade Kubernetes base resources (`deployment`, `service`, `configmap`, `hpa`, `pdb`, `ingress`) and Kustomize overlays (`dev`, `staging`, `prod`, `local-polyglot`).
      - `deploy/helm/`: Packaged Helm charts with parameterized templates, OCI packaging scripts, and environment-specific values.
      - `deploy/argocd/`: Declarative GitOps AppProject and ApplicationSet definitions.
-     - `deploy/terraform/`: Modular Infrastructure as Code (IaC) managing Network, Security, Stateful datastores, and Stateless compute.
+     - `deploy/terraform/`: Modular Google Cloud Platform Infrastructure as Code (IaC) managing Network, Security, Stateful datastores (AlloyDB, Memorystore Redis, Kafka), and Stateless compute.
      - `deploy/topology/`: Central `network_map.yaml` defining inter-service discovery, ports, and protocols.
      - `deploy/release/`: Automated, idempotently testable `deploy.sh` and `rollback.sh` runners.
 
 2. **Decoupled Database-per-Service with Centralized Shared Infrastructure**:
    - **Centralized Infrastructure**: Kafka streaming buses (`llmobs-kafka:9092`), Redis spend ledgers (`llmobs-redis:6379`), and OpenTelemetry collectors (`llmobs-otel-collector:4318`) reside on the shared `llmobs-network` bridge.
-   - **Service-Owned Datastores**: `alert-engine` exclusively owns its relational alert history database (`ewma_db` running on PostgreSQL / AlloyDB Omni). Direct cross-service database access is strictly prohibited.
+   - **Service-Owned Datastores**: `alert-engine` exclusively owns its relational alert history database (`ewma_db` running on Google Cloud AlloyDB Omni / PostgreSQL). Direct cross-service database access is strictly prohibited.
 
-3. **Multi-AZ Network Segmentation & Zero-Trust Firewalling**:
-   - A dedicated VPC (`10.0.0.0/16`) partitioned into:
-     - **Public Subnets**: Ingress load balancers and NAT Gateways.
-     - **Private Application Subnets**: Kubernetes worker nodes executing `alert-engine` pods.
-     - **Isolated Data Subnets**: Non-routable subnets hosting AlloyDB, Redis, and MSK Kafka brokers.
-   - **Defense-in-Depth Firewalling**: Layer 3/4 Network ACLs (NACLs) block all public ingress to data subnets. Security Groups enforce least-privilege ingress strictly from the service security group to datastore ports (`5432`, `6379`, `9092-9098`).
+3. **Multi-Subnet Network Segmentation & Zero-Trust Firewalling on Google Cloud**:
+   - A dedicated Google Cloud VPC network (`${environment}-llmobs-vpc`) partitioned into:
+     - **GKE Subnetwork (`10.0.1.0/24`)**: Private GKE worker nodes with secondary ranges for Pods (`10.48.0.0/14`) and Services (`10.52.0.0/20`), with Private Google Access enabled.
+     - **Isolated Data Subnetwork (`10.0.11.0/24`)**: Non-routable private subnetwork hosting Kafka broker clusters and Private Service Access peering for AlloyDB and Memorystore Redis.
+     - **Cloud NAT & Cloud Router**: Provides secure outbound egress for webhooks (Slack, PagerDuty) without exposing public IPs to worker nodes.
+   - **Defense-in-Depth Cloud Firewalls**: Ingress firewall rules strictly permit health checks (`8001`) and metrics (`9464`) from the VPC/Pod CIDRs, restrict database access (`5432`, `6379`, `9092`) to tagged `alert-engine` instances, and enforce a default-deny priority 2000 rule against all external traffic to the data tier.
 
-4. **Principle of Least Privilege Identity & Access Management (IAM)**:
-   - Dedicated AWS IAM execution role assumed via EKS IRSA (IAM Roles for Service Accounts).
-   - Scoped policies granting read-only access to specific AWS Secrets Manager secrets (`${environment}/alert-engine/database`) and AWS KMS cryptographic keys with automatic 30-day rotation.
+4. **Principle of Least Privilege Identity & Access Management (GCP IAM & Workload Identity)**:
+   - Dedicated Google Service Account (`${environment}-alert-engine-sa`) bound to the GKE Kubernetes ServiceAccount via GKE Workload Identity (`roles/iam.workloadIdentityUser`).
+   - Scoped IAM roles granting read-only access to Google Cloud Secret Manager (`roles/secretmanager.secretAccessor`) and Google Cloud KMS (`roles/cloudkms.cryptoKeyDecrypter`) with automatic 30-day key rotation.
 
 5. **Deterministic State Recovery & High-Availability Resilience**:
    - Containers declare `restart: unless-stopped` with named persistent storage volumes (`alert_engine_alloydb_data`, `llmobs_kafka_data`, `llmobs_redis_data`).
@@ -82,171 +82,163 @@ To permanently resolve these failure modes, we adopted an immutable, multi-targe
 
 ## 3. High Level Design (HLD) & Infrastructure Topology
 
-### 3.1 Network, Security, and Compute Architecture Diagram
+### 3.1 Google Cloud Platform (GCP) Infrastructure Topology Diagram
 
 ```mermaid
 flowchart TD
-    Internet([Internet / Remote Callers]) --> IGW[AWS Internet Gateway]
+    Internet([Internet / External Alert Sinks]) --> CloudNAT[Google Cloud NAT / Cloud Router]
 
-    subgraph VPC["Shared Platform VPC (10.0.0.0/16)"]
-        subgraph PublicTier["Public Ingress Tier (10.0.101.0/24 - 10.0.103.0/24)"]
-            IGW --> NAT[NAT Gateway]
-            IGW --> NginxIngress[NGINX Ingress Controller]
+    subgraph GCP_Project["Google Cloud Project (llmobs-${environment})"]
+        subgraph VPC["VPC Network: ${environment}-llmobs-vpc"]
+            
+            subgraph GKE_Tier["Private GKE Node Pool Subnet (10.0.1.0/24)"]
+                direction TB
+                GkeIngress[Internal Ingress / GKE Service] --> AlertPod1["alert-engine Pod 1\n(:8001 Health / :9464 Metrics)\nTags: alert-engine"]
+                GkeIngress --> AlertPod2["alert-engine Pod 2\n(:8001 Health / :9464 Metrics)\nTags: alert-engine"]
+                GkeHPA["Horizontal Pod Autoscaler (HPA)\nMin: 2, Max: 8"] -.->|Auto-scales| AlertPod1
+                GkePDB["Pod Disruption Budget (PDB)\nminAvailable: 1"] -.->|Protects| AlertPod1
+                CloudNAT -->|Egress Webhook Calls| AlertPod1
+            end
+
+            subgraph Data_Tier["Private Service Access / Data Subnet (10.0.11.0/24)"]
+                direction TB
+                GCP_AlloyDB[("Google Cloud AlloyDB Cluster\nPrimary Instance (2 vCPU)\nDatabase: ewma_db\nPrivate IP: 10.x.x.x")]
+                GCP_Redis[("Google Cloud Memorystore Redis 7\nAuth Enabled / Private Access\nPort: 6379")]
+                GCP_Kafka["Kafka Broker Cluster\nManaged Instance Group (3 Nodes)\nPorts: 9092, 9093\nTags: data-tier, kafka-broker"]
+            end
+
+            subgraph Firewall_Rules["GCP VPC Firewall Policy Rules"]
+                FW_Health["Rule: allow-health-metrics\nIngress TCP 8001, 9464 from Pods"]
+                FW_Data["Rule: allow-data-access\nIngress TCP 5432, 6379, 9092 strictly from tag:alert-engine"]
+                FW_Deny["Rule: deny-external-data\nPriority 2000 Deny 0.0.0.0/0 to tag:data-tier"]
+            end
         end
 
-        subgraph PrivateComputeTier["Private Compute Tier (10.0.1.0/24 - 10.0.3.0/24)"]
-            direction TB
-            NginxIngress -->|"Route /health & /metrics"| AlertK8sService["K8s ClusterIP: alert-engine"]
-            AlertK8sService --> AlertPod1["alert-engine Pod 1\n(:8001 Health / :9464 Metrics)"]
-            AlertK8sService --> AlertPod2["alert-engine Pod 2\n(:8001 Health / :9464 Metrics)"]
-            AlertHPA["Horizontal Pod Autoscaler (HPA)\nMin: 2, Max: 8"] -.->|Auto-scales| AlertPod1
-            AlertPDB["Pod Disruption Budget (PDB)\nminAvailable: 1"] -.->|Protects| AlertPod1
-            NAT -->|Egress Updates / Webhooks| AlertPod1
-        end
-
-        subgraph IsolatedDataTier["Isolated Data Tier - NACL Protected (10.0.11.0/24 - 10.0.13.0/24)"]
-            direction TB
-            SharedKafka["AWS MSK / llmobs-kafka\nPorts: 9092-9098\nTLS In-Transit Encryption"]
-            SharedRedis["AWS ElastiCache / llmobs-redis\nPort: 6379\nPassword Auth & AOF Enabled"]
-            AlloyDB["AWS RDS / AlloyDB Omni\nPort: 5432\nDatabase: ewma_db"]
+        subgraph SecurityPlane["GCP Security & Identity Plane"]
+            GCP_SA["Google Service Account\nalert-engine-sa@project.iam.gserviceaccount.com"]
+            GCP_WI["Workload Identity Binding\nroles/iam.workloadIdentityUser\nBound to k8s SA: alert-engine"]
+            GCP_KMS["Google Cloud KMS KeyRing\nCryptoKey: alert-engine-key\n(30-day auto-rotation)"]
+            GCP_Secrets["Google Secret Manager\nSecret: ${env}-alert-engine-database\n(username, password, db)"]
+            GCP_GCS[("Cloud Storage (GCS)\n${project}-${env}-alert-engine-artifacts\nUniform Bucket Access / Versioning")]
+            
+            GCP_SA --> GCP_KMS
+            GCP_SA --> GCP_Secrets
+            GCP_SA --> GCP_GCS
+            AlertPod1 -.->|"Workload Identity"| GCP_SA
         end
     end
 
-    subgraph ExternalEgress["External Notification Sinks"]
-        Slack["Slack Webhook Endpoint"]
+    subgraph ExternalEgress["External Incident Sinks"]
+        Slack["Slack Incoming Webhooks"]
         PagerDuty["PagerDuty Events v2 API"]
     end
 
-    AlertPod1 -->|"Consume 6 Alert Topics"| SharedKafka
-    AlertPod1 -->|"Sliding Window Rate Limit"| SharedRedis
-    AlertPod1 -->|"Audit Trail & Incident State"| AlloyDB
-    AlertPod1 -->|"Escalate Alerts"| Slack
-    AlertPod1 -->|"Trigger / Resolve P1 Pages"| PagerDuty
-
-    subgraph SecurityPlane["IAM & Secret Management Plane"]
-        IAMRole["EKS Execution Role\nIRSA: alert-engine-execution-role"]
-        KMS["AWS KMS Customer Managed Key\n(Auto-Rotation 30 Days)"]
-        SecretsMgr["AWS Secrets Manager\n${environment}/alert-engine/database"]
-        IAMRole --> KMS
-        IAMRole --> SecretsMgr
-        AlertPod1 -.->|"Assumes Role"| IAMRole
-    end
+    AlertPod1 -->|"Consume Events (Offset Commit)"| GCP_Kafka
+    AlertPod1 -->|"Atomic Rate Limiting"| GCP_Redis
+    AlertPod1 -->|"Audit Trail Persistence"| GCP_AlloyDB
+    AlertPod1 -->|"Dispatches Webhooks (via Cloud NAT)"| Slack
+    AlertPod1 -->|"P1 Escalation (via Cloud NAT)"| PagerDuty
 ```
 
 ---
 
 ## 4. Deep-Dive Infrastructure Subsystems
 
-### 4.1 Network Infrastructure: Topology, Routing, and Subnets
+### 4.1 Network Infrastructure: GCP VPC, Subnetworks, and Cloud NAT
 
-The network topology is designed around multi-AZ redundancy, traffic segregation, and defense-in-depth isolation:
+The network topology implements multi-zone resilience and private-only addressing across Google Cloud:
 
 ```mermaid
 flowchart LR
-    subgraph VPC_CIDR["VPC CIDR: 10.0.0.0/16"]
-        subgraph AZ_A["Availability Zone: us-east-1a"]
-            Pub_A["Public Subnet A\n10.0.101.0/24\n(IGW, NAT GW)"]
-            Priv_A["Private Subnet A\n10.0.1.0/24\n(EKS Worker Pods)"]
-            Data_A["Data Subnet A\n10.0.11.0/24\n(AlloyDB Primary)"]
+    subgraph VPC_Network["Google Cloud VPC Network: ${environment}-llmobs-vpc"]
+        subgraph Subnet_GKE["Subnetwork: gke-subnet (10.0.1.0/24)"]
+            Primary_Range["Node IPs: 10.0.1.0/24"]
+            Secondary_Pods["Secondary Range 'gke-pods': 10.48.0.0/14"]
+            Secondary_Services["Secondary Range 'gke-services': 10.52.0.0/20"]
         end
 
-        subgraph AZ_B["Availability Zone: us-east-1b"]
-            Pub_B["Public Subnet B\n10.0.102.0/24\n(Standby IGW Route)"]
-            Priv_B["Private Subnet B\n10.0.2.0/24\n(EKS Worker Pods)"]
-            Data_B["Data Subnet B\n10.0.12.0/24\n(AlloyDB Standby / Redis)"]
+        subgraph Subnet_Data["Subnetwork: data-subnet (10.0.11.0/24)"]
+            Kafka_Nodes["Compute Engine Kafka MIG\n10.0.11.x (3 Nodes)"]
+            PGA["Private Google Access: ENABLED"]
         end
 
-        subgraph AZ_C["Availability Zone: us-east-1c"]
-            Pub_C["Public Subnet C\n10.0.103.0/24"]
-            Priv_C["Private Subnet C\n10.0.3.0/24\n(EKS Worker Pods)"]
-            Data_C["Data Subnet C\n10.0.13.0/24\n(Kafka MSK Broker 3)"]
+        subgraph PSA_Range["Private Service Access (VPC Peering: 10.16.0.0/16)"]
+            AlloyDB_Private["Google Cloud AlloyDB Omni Instance\nInternal IP Peered"]
+            Redis_Private["Cloud Memorystore Redis 7\nInternal IP Peered"]
         end
     end
 
-    Pub_A -->|"Default 0.0.0.0/0 Route"| IGW_Route["Internet Gateway (IGW)"]
-    Priv_A -->|"Egress 0.0.0.0/0 via NAT"| NAT_Route["NAT Gateway (Elastic IP)"]
-    Data_A -.->|"No Internet Route\nIsolated Local Routing Only"| Local_Route["Local VPC Peering / NACL Boundary"]
+    Router["Cloud Router: nat-router"] --> NAT_GW["Cloud NAT: nat-gw (AUTO_ONLY IPs)"]
+    Subnet_GKE -->|"Private Outbound 0.0.0.0/0"| NAT_GW
+    NAT_GW -->|"Egress to Slack / PagerDuty"| ExtInternet[Public Internet]
 ```
 
-#### Detailed Subnet Allocation Table
-| Subnet Classification | CIDR Block | Availability Zone | Route Table Target | Purpose & Placed Workloads |
+#### Detailed Google Cloud Subnetwork Allocation Table
+| Subnetwork Name | Primary CIDR Block | Secondary CIDR Ranges | Private Google Access | Purpose & Placed Workloads |
 |---|---|---|---|---|
-| `public-subnet-1` | `10.0.101.0/24` | `us-east-1a` | `aws_internet_gateway.gw` | Public Ingress ALB, NAT Gateway Elastic IP |
-| `public-subnet-2` | `10.0.102.0/24` | `us-east-1b` | `aws_internet_gateway.gw` | Public Ingress ALB Redundancy |
-| `public-subnet-3` | `10.0.103.0/24` | `us-east-1c` | `aws_internet_gateway.gw` | Public Ingress ALB Multi-AZ Quorum |
-| `private-subnet-1` | `10.0.1.0/24` | `us-east-1a` | `aws_nat_gateway.nat` | Kubernetes Node Group 1 (`alert-engine` Pod 1) |
-| `private-subnet-2` | `10.0.2.0/24` | `us-east-1b` | `aws_nat_gateway.nat` | Kubernetes Node Group 2 (`alert-engine` Pod 2) |
-| `private-subnet-3` | `10.0.3.0/24` | `us-east-1c` | `aws_nat_gateway.nat` | Kubernetes Node Group 3 (Burst Replicas) |
-| `data-subnet-1` | `10.0.11.0/24` | `us-east-1a` | Local Only (`10.0.0.0/16`) | AlloyDB / Postgres Primary Instance, MSK Broker 1 |
-| `data-subnet-2` | `10.0.12.0/24` | `us-east-1b` | Local Only (`10.0.0.0/16`) | AlloyDB Standby Replica, ElastiCache Redis Primary |
-| `data-subnet-3` | `10.0.13.0/24` | `us-east-1c` | Local Only (`10.0.0.0/16`) | ElastiCache Redis Replica, MSK Broker 3 |
+| `${environment}-gke-subnet` | `10.0.1.0/24` | `gke-pods`: `10.48.0.0/14`<br>`gke-services`: `10.52.0.0/20` | Enabled | GKE worker nodes executing `alert-engine` replicas |
+| `${environment}-data-subnet` | `10.0.11.0/24` | None | Enabled | Kafka Managed Instance Group (MIG) brokers |
+| `servicenetworking-peering` | `10.16.0.0/16` | Allocated Global Range | N/A (Internal Peering) | Google Cloud AlloyDB cluster and Memorystore Redis |
 
 ---
 
-### 4.2 Security & Firewall Infrastructure: Defense-in-Depth
-
-Security enforcement operates across three nested perimeters:
-1. **Perimeter 1: Stateless Network ACLs (NACLs)** at the subnet boundary.
-2. **Perimeter 2: Stateful Security Groups** at the elastic network interface (ENI) boundary.
-3. **Perimeter 3: Cryptographic Identity & Envelope Encryption (IAM / KMS)** at the application boundary.
+### 4.2 Security & Firewall Infrastructure: GCP Workload Identity & Cloud Firewalls
 
 ```mermaid
 flowchart TD
-    subgraph TrafficFlow["Inbound Traffic Verification Pipeline"]
-        ExternalPacket["Incoming Packet (Wire)"] --> NACL_Check{"1. Subnet NACL Filter\n(Stateless Layer 3/4)"}
-        NACL_Check -->|Rule Reject / Dropped| Blackhole["Dropped Packet (NACL Deny)"]
-        NACL_Check -->|Rule Allow| SG_Check{"2. Security Group Filter\n(Stateful SPI Firewall)"}
-        SG_Check -->|Port/Source Mismatch| SG_Drop["Dropped Packet (SG Reject)"]
-        SG_Check -->|Port 8001 / 9464 Allowed| Container["3. Container Runtime Environment\n(Non-Root UID 10001)"]
-        Container --> IAM_Auth{"4. IRSA Token Auth\n(AWS STS AssumeRole)"}
-        IAM_Auth -->|Authorized ServiceAccount| DecryptSecret["5. KMS Decrypt Secret Value\n(AWS Secrets Manager)"]
-        DecryptSecret --> ApplicationRun["6. Secure Application Execution"]
+    subgraph TrafficFlow["GCP Inbound & Identity Security Pipeline"]
+        Packet["Incoming Ingress Packet"] --> FW1{"1. GCP VPC Firewall Filter\n(Stateful Tag-Based Inspection)"}
+        FW1 -->|Port 8001 / 9464 Allowed| GKE_Node["2. GKE Node & Container Runtime\n(Non-Root UID 10001)"]
+        FW1 -->|Port 5432 / 6379 / 9092 Allowed from Tag alert-engine| Data_Node["Data Tier Services"]
+        FW1 -->|Rule Deny (Priority 2000)| Drop["Dropped Packet (FW Denied)"]
+        
+        GKE_Node --> WI_Auth{"3. GKE Workload Identity\n(JWT Federated Token Exchange)"}
+        WI_Auth -->|Assume Service Account| GCP_Token["GCP Short-Lived Access Token"]
+        GCP_Token --> DecryptSecret["4. Secret Manager + KMS Decryption\n(Read Database Password)"]
+        DecryptSecret --> SecureBoot["5. Secure Engine Boot & Execution"]
     end
 ```
 
-#### Firewall Rules & Security Group Matrix
-| Security Group Identifier | Direction | Protocol | Port Range | Source / Destination | Security Rationale |
-|---|---|---|---|---|---|
-| `alert-engine-sg` | Ingress | TCP | `8001` | `10.0.0.0/16` (VPC CIDR) | Health check probes (`/health`) from Kubernetes kubelet |
-| `alert-engine-sg` | Ingress | TCP | `9464` | `10.0.0.0/16` (VPC CIDR) | Prometheus metrics scraper scraping `/metrics` |
-| `alert-engine-sg` | Egress | TCP | `5432` | `alert-engine-data-sg` | Relational database queries to AlloyDB/PostgreSQL |
-| `alert-engine-sg` | Egress | TCP | `6379` | `alert-engine-data-sg` | Atomic rate limiting & incident state operations to Redis |
-| `alert-engine-sg` | Egress | TCP | `9092-9098` | `alert-engine-data-sg` | Telemetry event consumption from Kafka broker cluster |
-| `alert-engine-sg` | Egress | TCP | `443` | `0.0.0.0/0` (via NAT Gateway) | Secure outbound webhook dispatch to Slack and PagerDuty APIs |
-| `alert-engine-data-sg` | Ingress | TCP | `5432` | `alert-engine-sg` | Restricts database access strictly to authorized worker pods |
-| `alert-engine-data-sg` | Ingress | TCP | `6379` | `alert-engine-sg` | Restricts Redis cache access strictly to authorized worker pods |
-| `alert-engine-data-sg` | Ingress | TCP | `9092-9098` | `alert-engine-sg` | Restricts Kafka stream consumption strictly to worker pods |
-| `alert-engine-data-sg` | Egress | TCP | Ephemeral | `10.0.0.0/16` | Return packets for established TCP database sessions |
+#### GCP Firewall Rules Matrix
+| Firewall Rule Name | Direction | Protocol | Port Range | Source Target | Destination Target | Security Purpose |
+|---|---|---|---|---|---|---|
+| `allow-health-metrics` | Ingress | TCP | `8001`, `9464` | `10.0.0.0/16`, `10.48.0.0/14` | Target tag: `alert-engine` | Allows kubelet liveness/readiness probes and Prometheus scraping |
+| `allow-data-access` | Ingress | TCP | `5432`, `6379`, `9092-9094` | Source tag: `alert-engine` | Target tag: `data-tier` | Strictly restricts database and Kafka access to alert-engine pods |
+| `deny-external-data` | Ingress | ALL | ALL | `0.0.0.0/0` | Target tag: `data-tier` (Priority 2000) | Complete isolation of databases from any external inbound traffic |
 
 ---
 
-### 4.3 Storage Infrastructure: Dual-Engine Relational & Streaming Ledgers
-
-The storage architecture implements clean segregation between operational event streaming, in-memory rate limiting, relational persistence, and encrypted artifact retention:
+### 4.3 Storage Infrastructure: AlloyDB Omni, Cloud Memorystore, and GCS
 
 ```mermaid
 flowchart TD
-    subgraph IngestionStream["1. Event Streaming Ledger (Kafka)"]
+    subgraph StreamingPlane["1. Event Streaming Ledger (Kafka MIG)"]
         TopicBudget["alerts.budget\n(Compacted / 7 Days)"]
         TopicCost["alerts.cost.anomaly\n(Retained 14 Days)"]
         TopicTox["llm.toxicity.flagged\n(Encrypted / 30 Days)"]
         TopicSlo["alerts.latency.slo\n(Retained 7 Days)"]
     end
 
-    subgraph MemoryTier["2. Real-Time Distributed Ledger (Redis 7)"]
+    subgraph MemoryTier["2. Real-Time Distributed Ledger (Cloud Memorystore Redis 7)"]
         RateLimits["Sliding Window Rate Limiters\n(Key: alert_rl:{tenant}:{type})"]
         IncidentState["Incident Lifecycle Tracker\n(Key: alert_inc:{service}:{incident_id})"]
         DedupIndex["Fingerprint Deduplication Cache\n(Key: alert_dedup:{sha256_hash})"]
     end
 
-    subgraph RelationalStore["3. Audit & State Store (AlloyDB Omni / Postgres)"]
+    subgraph RelationalStore["3. Audit & State Store (Google Cloud AlloyDB Omni)"]
         TableAlerts["Table: alert_history\n- alert_id (UUID, PK)\n- alert_type (Enum)\n- severity (Enum)\n- tenant_id (VARCHAR)\n- payload (JSONB)\n- created_at (TIMESTAMPTZ)"]
         TableAudits["Table: alert_dispatch_logs\n- dispatch_id (UUID)\n- target_sink (Slack/PD)\n- status_code (INT)\n- latency_ms (NUMERIC)"]
     end
 
-    subgraph ObjectStore["4. Long-Term Encrypted Archive (S3)"]
-        ArtifactBucket["S3: ${env}-alert-engine-artifacts\n- Versioning Enabled\n- AES-256 Server-Side Encryption\n- Automated Lifecycle to Glacier after 90 days"]
+    subgraph ObjectStore["4. Cloud Storage Archive (Google Cloud Storage)"]
+        ArtifactBucket["GCS Bucket: ${project}-${env}-alert-engine-artifacts\n- Uniform Bucket-Level Access\n- Object Versioning Enabled\n- Google-Managed / KMS Customer Encryption"]
     end
+
+    StreamingPlane -->|"Poll & Commit Offsets"| Worker["alert-engine Consumer"]
+    Worker -->|"HINCRBY / Sliding Window Query"| MemoryTier
+    Worker -->|"INSERT ON CONFLICT"| RelationalStore
+    Worker -.->|"Flush Diagnostic Dumps"| ObjectStore
+```
 
     IngestionStream -->|"Poll & Commit Offsets"| Worker["alert-engine Consumer"]
     Worker -->|"HINCRBY / Sliding Window Query"| MemoryTier

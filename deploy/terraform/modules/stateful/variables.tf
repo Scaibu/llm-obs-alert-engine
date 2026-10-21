@@ -1,3 +1,7 @@
+variable "project_id" {
+  type = string
+}
+
 variable "environment" {
   type = string
 }
@@ -6,27 +10,14 @@ variable "service_name" {
   type = string
 }
 
-variable "db_instance_class" {
-  type    = string
-  default = "db.r6g.large"
+variable "region" {
+  type = string
 }
 
-variable "subnet_ids" {
-  type    = list(string)
-  default = []
+variable "network_id" {
+  type = string
 }
 
-variable "security_group_id" {
-  type    = string
-  default = ""
-}
-
-variable "kafka_instance_type" {
-  type    = string
-  default = "kafka.m5.large"
-}
-
-variable "kafka_broker_count" {
-  type    = number
-  default = 3
+variable "data_subnet_id" {
+  type = string
 }

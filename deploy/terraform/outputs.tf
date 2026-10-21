@@ -8,37 +8,32 @@ output "environment" {
   value       = var.environment
 }
 
-output "vpc_id" {
-  description = "VPC ID of the network topology"
-  value       = module.network.vpc_id
+output "network_name" {
+  description = "VPC network name"
+  value       = module.network.network_name
 }
 
-output "security_group_id" {
-  description = "Security group attached to the compute workloads"
-  value       = module.security.service_security_group_id
+output "service_account_email" {
+  description = "GCP Workload Identity Service Account email"
+  value       = module.security.service_account_email
 }
 
-output "data_security_group_id" {
-  description = "Firewall security group protecting datastores"
-  value       = module.security.data_security_group_id
+output "kms_key_id" {
+  description = "Cloud KMS Key ID"
+  value       = module.security.kms_key_id
 }
 
-output "service_role_arn" {
-  description = "IAM role ARN assumed by alert-engine service"
-  value       = module.security.service_role_arn
+output "alloydb_ip" {
+  description = "AlloyDB Omni cluster internal IP"
+  value       = module.stateful.alloydb_ip
 }
 
-output "db_endpoint" {
-  description = "PostgreSQL / AlloyDB database endpoint"
-  value       = module.stateful.db_endpoint
+output "redis_host" {
+  description = "Google Cloud Memorystore Redis host"
+  value       = module.stateful.redis_host
 }
 
-output "cache_endpoint" {
-  description = "Redis cluster endpoint"
-  value       = module.stateful.cache_endpoint
-}
-
-output "kafka_bootstrap_brokers" {
-  description = "Kafka cluster bootstrap broker endpoints"
-  value       = module.stateful.kafka_bootstrap_brokers
+output "alert_artifacts_bucket" {
+  description = "Cloud Storage bucket name for alert artifacts"
+  value       = module.stateful.alert_artifacts_bucket_name
 }
