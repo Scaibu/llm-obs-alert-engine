@@ -1,444 +1,229 @@
-# Alert Engine Worker
+# LLM Observability — Alert Engine (`alert-engine`)
 
-Kafka consumer worker that processes and routes budget thresholds and cost anomaly alerts to PostgreSQL database history logs, Slack workspace channels, and PagerDuty endpoints.
-
----
-
-## Why Use the Alert Engine?
-- **Zero Spam (Deduplication)**: Suppresses duplicate alerts for the same `(user_id, model)` or `(service, model)` within a 15-minute rate-limiting window using Redis.
-- **Dynamic Routing**:
-  - **Budget Blocked**: Sent to a public `#llm-cost-alerts` Slack channel.
-  - **Budget Warnings**: Looked up dynamically and sent as a direct Slack DM to the service owner.
-  - **Cost Anomalies**: Triggers high-priority PagerDuty incidents (except during service cold-starts).
-- **Persistent Logs**: Every dispatched alert is written to PostgreSQL for historical audits and analysis.
-- **Traceability**: Out-of-the-box OpenTelemetry tracing propagation using the W3C standard.
+A resilient, cloud-native incident dispatch, anomaly detection, and notification routing engine for high-throughput LLM observability platforms.
 
 ---
 
-## Architecture Dependencies
-Ensure these services are available in your infrastructure environment:
-1. **Kafka / Redpanda Broker**: Event stream source.
-2. **Redis Cache (>= 6.0)**: Used for suppression / rate-limit locking.
-3. **PostgreSQL Database (>= 12)**: Store target for the `alert_history` table.
+## 1. What is this Package?
+
+The **`alert-engine`** is an event-driven worker service within the `llm-obs` platform. It continuously consumes, processes, deduplicates, and dispatches critical anomaly events emitted by sibling workers across the monorepo:
+* **Cost & Budget Breaches**: Real-time token budget exhaustion from `budget-provisioner` and EWMA cost spikes from `event-cost`.
+* **Safety & Guardrails**: Content moderation flags and toxic prompt/completion breaches from `toxicity`.
+* **Inference Quality Degradation**: Semantic drift, coherence erosion, and perplexity degradation from `quality-engine`.
+* **Latency & SLO Regressions**: P95/P99 latency breaches from `latency-engine` and Time-To-First-Token (TTFT) regressions from `slo-burn-worker`.
+
+It serves as the central intelligent routing layer between asynchronous telemetry event streams and real-time operational incident management channels (Slack webhooks, PagerDuty Events API v2), backed by distributed sliding-window rate limiting in Redis and relational audit trails in AlloyDB/PostgreSQL.
 
 ---
 
-## Kafka Configuration
-Make sure the following topics are created on your Kafka broker before starting the engine:
-* **`alerts.budget`**: Receives budget threshold event payloads.
-* **`alerts.cost.anomaly`**: Receives cost anomaly event payloads.
-* **`llm.toxicity.flagged`**: Receives flagged toxicity event payloads.
-* **`alerts.latency.slo`**: Receives latency SLO breach event payloads.
-* **`alerts.latency.ttft_regression`**: Receives TTFT P99 latency regression alerts.
+## 2. Exactly Why Do We Need This? (The Problem It Solves)
 
+In modern enterprise LLM architectures, models are non-deterministic, usage-priced, and prone to silent failures. Operating production LLM systems without a dedicated alert engine leads to critical systemic vulnerabilities:
 
-*Default Consumer Group:* `alert-engine-group`
+### 2.1 Preventing Catastrophic Runaway Cost Overruns
+* **The Problem**: A rogue prompt recursion or automated agent loop can execute thousands of GPT-4/Claude-3 queries in minutes, rapidly accumulating tens of thousands of dollars before humans notice.
+* **The Solution**: `alert-engine` consumes real-time `alerts.budget` and `alerts.cost.anomaly` events. Upon a hard ceiling breach, it notifies engineering teams instantly and flags budget blocks to stop further drain.
 
----
+### 2.2 Eliminating Alert Fatigue & Notification Storms (Zero-Spam Deduplication)
+* **The Problem**: When an LLM endpoint degrades or is rate-limited, every concurrent user query fails. Naive alert listeners blast on-call engineers with tens of thousands of duplicate Slack notifications and pager sirens within seconds.
+* **The Solution**: Incorporates distributed sliding-window rate limiting and fingerprint deduplication using Redis. Alerts for the same `(tenant_id, alert_type, service)` are capped (e.g. max 5 alerts per 5-minute window). Once an incident is marked `ACKNOWLEDGED`, repetitive notifications are suppressed while raw occurrences continue to be logged for historical audit trails.
 
+### 2.3 Context-Aware GitOps Routing (Right Alert to the Right Person)
+* **The Problem**: Sending all platform alerts into a generic channel causes teams to ignore notifications. Sending cost alerts to engineers who do not own the offending service leads to delayed resolution.
+* **The Solution**: Dynamically resolves service ownership from GitOps manifests (`config/service_owners.yaml`). Budget warnings (80% ceiling) are sent directly to service owners via Slack DMs, budget exhaustion goes to `#llm-cost-alerts`, and severe P1 latency breaches trigger escalated on-call PagerDuty incidents.
 
-## Expected Results (Outputs)
-Upon consuming events, the engine performs the following actions:
-* Inserts a record into the PostgreSQL `alert_history` table:
-  ```sql
-  SELECT * FROM alert_history ORDER BY created_at DESC;
-  ```
-* Dispatches Slack notifications/DMs or triggers PagerDuty API calls.
-* Exposes execution span telemetry metrics on port `9464`.
+### 2.4 Immutable Auditability & Compliance Ledger
+* **The Problem**: Regulatory compliance (SOC2, EU AI Act, internal risk management) requires a tamper-proof audit trail of every safety violation, toxic output, and budget override.
+* **The Solution**: Every processed alert—whether delivered or rate-limited—is persisted to the relational `alert_history` table with cryptographic tracing headers (`traceparent`), execution timestamps, and full JSON payloads.
 
 ---
 
-## Folder Structure
+## 3. High-Level Architecture & Integration Flow
 
+```mermaid
+flowchart TD
+    subgraph MonorepoProducers["Monorepo Sibling Producers"]
+        BudgetWorker["budget-provisioner\n(alerts.budget)"]
+        CostWorker["event-cost\n(alerts.cost.anomaly)"]
+        ToxicityWorker["toxicity\n(llm.toxicity.flagged)"]
+        QualityWorker["quality-engine\n(alerts.quality.degradation)"]
+        LatencyWorker["latency-engine\n(alerts.latency.slo)"]
+        SloWorker["slo-burn-worker\n(alerts.latency.ttft_regression)"]
+    end
+
+    subgraph KafkaStream["Kafka Event Bus (llmobs-kafka:9092)"]
+        direction TB
+        Topic1["Topic: alerts.budget"]
+        Topic2["Topic: alerts.cost.anomaly"]
+        Topic3["Topic: llm.toxicity.flagged"]
+        Topic4["Topic: alerts.quality.degradation"]
+        Topic5["Topic: alerts.latency.slo"]
+        Topic6["Topic: alerts.latency.ttft_regression"]
+    end
+
+    subgraph AlertEngineService["alert-engine Consumer (Consumer Group: alert-engine-group)"]
+        direction TB
+        ConsumerLoop["Worker Consumer Loop (src/main.py)"]
+        Dispatcher["Handler Registry & Envelope Parser"]
+        
+        subgraph Handlers["Specialized Invariant Handlers"]
+            H_Budget["BudgetAlertHandler"]
+            H_Cost["CostAnomalyAlertHandler"]
+            H_Tox["ToxicityAlertHandler"]
+            H_Quality["QualityDegradationAlertHandler"]
+            H_Slo["LatencySloAlertHandler"]
+            H_Ttft["LatencyTtftRegressionAlertHandler"]
+        end
+
+        RedisLimiter["Redis Sliding Window Rate Limiter & Dedup"]
+        Ownership["GitOps Service Owners Resolver"]
+    end
+
+    subgraph ExternalSinks["External Incident Management"]
+        Slack["Slack Webhook\n(#alerts / Service Owner DMs)"]
+        PagerDuty["PagerDuty Events v2 API\n(Critical On-Call Escalation)"]
+    end
+
+    subgraph DataStorage["Persistence & Telemetry"]
+        AlloyDB[("PostgreSQL / AlloyDB\nTable: alert_history")]
+        Prometheus["Prometheus Metrics Server\n(:9464 /metrics)"]
+        HealthServer["HTTP Health Server\n(:8001 /healthz, /readyz)"]
+    end
+
+    MonorepoProducers --> KafkaStream
+    KafkaStream --> ConsumerLoop
+    ConsumerLoop --> Dispatcher
+    Dispatcher --> Handlers
+    Handlers --> RedisLimiter
+    RedisLimiter -->|"Allowed"| Ownership
+    RedisLimiter -.->|"Rate Limited (Audit Only)"| AlloyDB
+    Ownership --> Slack
+    Ownership --> PagerDuty
+    Ownership --> AlloyDB
+    ConsumerLoop -.-> Prometheus
+    ConsumerLoop -.-> HealthServer
 ```
-.
-├── build/
-│   └── Dockerfile
+
+---
+
+## 4. Key Capabilities & Features
+
+| Capability | Technical Mechanism | Benefit |
+|---|---|---|
+| **Zero-Spam Deduplication** | Sliding-window token buckets and SHA-256 fingerprint deduplication in Redis (`REDIS_URL`). | Protects on-call engineers from notification floods during major outages. |
+| **Deterministic Routing** | Declarative YAML ownership lookup (`config/service_owners.yaml`). | Alerts route directly to responsible team channels or direct DMs. |
+| **Hexagonal Isolation** | Clear separation between Domain Handlers and Infrastructure Ports/Adapters. | Core business rules remain pure; storage and notification adapters can be swapped or mocked in unit tests. |
+| **Fail-Safe Processing** | Comprehensive error mapping (`DbErrorMapping`), transient network retries, and poison-pill DLQ routing. | A single malformed message will never crash the consumer loop or block healthy partitions. |
+| **Full Distributed Tracing** | W3C `traceparent` extraction and OpenTelemetry span propagation. | Correlates alert notifications directly back to the origin user request span in Tempo/Jaeger. |
+| **Dual Health Probes** | Embedded HTTP server on port `8001` serving `/healthz` (liveness) and `/readyz` (readiness). | Kubernetes and Cloud Run can reliably monitor container lifecycles and trigger zero-downtime rolling updates. |
+| **Multi-Target Deployment** | Declarative manifests for Docker Compose, Kubernetes/Kustomize, Helm, ArgoCD, and Google Cloud Terraform. | Seamless transition from local development to production on Google Kubernetes Engine (GKE) and AlloyDB. |
+
+---
+
+## 5. Directory Structure
+
+```text
+alert-engine/
+├── adr/
+│   └── 0001-cloud-native-deployment-and-resilient-infrastructure.md
+├── config/
+│   ├── default.yaml            # Default configuration tree
+│   ├── endpoints.yaml          # External connection endpoints
+│   ├── env.schema              # Environment variable validation schema
+│   ├── feature-flags.yaml     # Runtime behavior feature flags
+│   ├── production.yaml        # Production environment overrides
+│   ├── service_owners.yaml    # GitOps service ownership mapping
+│   └── test.yaml              # Unit/integration test configuration
 ├── contracts/
-│   └── events/
-│       ├── alerts.budget.yaml
-│       └── alerts.cost.anomaly.yaml
+│   └── asyncapi/v1.yaml       # AsyncAPI event contract specifications
 ├── database/
-│   └── migrations/
-│       ├── 0001_init.rollback.sql
-│       ├── 0001_init.sql
-│       └── schema.lock
+│   ├── migrations/sql/        # Declarative SQL migrations (0001_init.sql)
+│   ├── engine/                # Connection pool, transaction, and executor
+│   └── schema.lock            # Cryptographic migration checksum lockfile
 ├── deploy/
-│   └── docker/
-│       └── docker-compose.yaml
-├── feature-registry.yaml
-├── pyproject.toml
-├── README.md
-├── scripts/
-│   ├── deploy_docker.sh
-│   ├── migrate.py
-│   ├── migrate.sh
-│   ├── run.sh
-│   └── test.sh
+│   ├── docker/                # Multi-stage Dockerfiles and Docker Compose profiles
+│   ├── k8s/                   # Kubernetes base manifests and environment overlays
+│   ├── helm/                  # Helm packaging, templates, and environment values
+│   ├── argocd/                # ArgoCD AppProject and ApplicationSet definitions
+│   ├── terraform/             # Google Cloud Platform (GCP) IaC (VPC, Firewalls, AlloyDB, GCS, KMS)
+│   ├── topology/              # network_map.yaml inter-service discovery contracts
+│   └── release/               # Automated deploy.sh and rollback.sh release runners
+├── messaging/
+│   ├── schemas/               # Event schema registry manifests (.yaml)
+│   ├── policies/              # Dead Letter Queue and retry policies
+│   └── engine/                # Kafka client, consumer group, and publisher implementations
 ├── src/
-│   ├── features/
-│   │   └── latency_slo/
-│   │       ├── contex.ymal
-│   │       ├── index.py
-│   │       ├── service.py
-│   │       └── types.py
-│   ├── handlers/
-│   │   ├── alerts_budget/
-│   │   │   └── handler.py
-│   │   ├── alerts_cost_anomaly/
-│   │   │   └── handler.py
-│   │   ├── alerts_latency_slo/
-│   │   │   └── handler.py
-│   │   └── alerts_toxicity/
-│   │       └── handler.py
-│   ├── adapters/
-│   │       ├── metrics/
-│   │       │   └── prometheus_adapter.py
-│   │       ├── pagerduty/
-│   │       │   └── pagerduty_adapter.py
-│   │       ├── postgres/
-│   │       │   └── postgres_adapter.py
-│   │       ├── redis/
-│   │       │   └── redis_adapter.py
-│   │       └── slack/
-│   │           └── slack_adapter.py
-│   ├── shared/
-│   │   └── ports/
-│   │       ├── db_port.py
-│   │       ├── metrics_port.py
-│   │       ├── pagerduty_port.py
-│   │       ├── redis_port.py
-│   │       └── slack_port.py
-│   └── worker/
-│       ├── config.py
-│       ├── index.py
-│       └── registry.py
+│   ├── main.py                # Service entry point & 9-phase bootstrap lifecycle
+│   ├── adapters/              # Hexagonal adapters (Postgres, Redis, Slack, PagerDuty, Prometheus)
+│   ├── config/                # Strongly-typed configuration loader
+│   ├── features/              # Feature modules (latency_slo, ttft_regression, toxicity, etc.)
+│   ├── handlers/              # Event handlers for all 6 Kafka topics
+│   ├── ports/                 # Abstract interfaces (DbPort, RedisPort, SlackPort, etc.)
+│   └── shared/                # Pure utilities (rate_limiter, service_owners, errors)
 ├── tests/
-│   └── unit/
-│       ├── test_budget_handler.py
-│       ├── test_cost_anomaly_handler.py
-│       ├── test_failures.py
-│       └── test_tracing.py
-├── worker-registry.yaml
-└── service_owners.yaml
+│   ├── unit/                  # Fast in-memory unit tests
+│   ├── integration/           # Datastore and Redis integration tests
+│   ├── scenario/              # End-to-end multi-step alert lifecycle tests
+│   └── e2e/                   # Full pipeline verification tests
+└── pyproject.toml             # Python build and dependency manifest
 ```
 
 ---
 
-## Work Execution & Decision Flow
+## 6. Supported Kafka Topics & Contracts
 
-The following decision trees detail the routing and suppression rules for budget and cost anomaly events:
-
-### 1. Budget Alerts Routing (`alerts.budget` topic)
-
-```
-[alerts.budget Event Consumed]
-└── Rate Limit Check (Redis: rate_limit:budget_alert:{user_id}:{model})
-    │
-    │   ► RATIONALE: Dedups repeat alerts within a 15-minute (900s) window.
-    │     If the rate limit key exists, processing is suppressed to prevent
-    │     alert fatigue.
-    │
-    ├── Key Exists (Suppressed)
-    │   └── Skip processing
-    │
-    └── Key Acquired (Proceed)
-        ├── 1. Parse Delivery Latency (timestamp_utc vs now)
-        ├── 2. Write to PostgreSQL (alert_history table)
-        ├── 3. Emit Prometheus histogram latency metric
-        └── 4. Notification Dispatch:
-            ├── event_type = 'blocked'
-            │   └── Slack message to #llm-cost-alerts channel
-            └── event_type = 'warning_80pct'
-                └── Lookup owner in service_owners.yaml & send Slack DM
-```
-
-### 2. Cost Anomaly Alerts Routing (`alerts.cost.anomaly` topic)
-
-```
-[alerts.cost.anomaly Event Consumed]
-└── Check is_cold_start (payload is_cold_start OR sample_count < 7)
-    │
-    ├── is_cold_start = TRUE
-    │   ├── 1. Write to PostgreSQL (alert_history table)
-    │   └── 2. Log message only (Do NOT notify Slack/PagerDuty)
-    │
-    └── is_cold_start = FALSE
-        └── Check Burn Ratio (current_cost / ewma_value)
-            │
-            ├── burn_ratio <= 3.0 (Normal Deviation)
-            │   └── Skip notification
-            │
-            └── burn_ratio > 3.0 (Cost Spike detected)
-                └── Rate Limit Check (Redis: rate_limit:cost_anomaly:{service}:{model})
-                    │
-                    │   ► RATIONALE: Suppresses repeat anomaly alerts within a
-                    │     1-hour (3600s) window.
-                    │
-                    ├── Key Exists (Suppressed)
-                    │   └── Skip notifications
-                    │
-                    └── Key Acquired (Proceed)
-                        ├── 1. Write to PostgreSQL (alert_history table)
-                        ├── 2. Emit Prometheus latency metrics (critical severity)
-                        ├── 3. Send PagerDuty incident alert
-                        └── 4. Send Slack alert with drill-down (top contributor cluster)
-```
-
-### 3. TTFT Regression Alerts Routing (`alerts.latency.ttft_regression` topic)
-
-```
-[alerts.latency.ttft_regression Event Consumed]
-└── Rate Limit Check (Redis: rate_limit:latency_ttft_regression:{model}:{hour_of_day})
-    │
-    │   ► RATIONALE: Suppresses repeat TTFT regression alerts within a
-    │     6-hour (21600s) window per model and hour of day.
-    │
-    ├── Key Exists (Suppressed)
-    │   └── Skip processing
-    │
-    └── Key Acquired (Proceed)
-        ├── 1. Parse Delivery Latency (timestamp vs now)
-        ├── 2. Write to PostgreSQL (alert_history table)
-        ├── 3. Emit Prometheus latency metrics
-        └── 4. Send Slack alert message to #llm-latency-alerts channel
-```
+| Topic Name | Producer Service | Schema Contract | Purpose |
+|---|---|---|---|
+| **`alerts.budget`** | `budget-provisioner` | [`alerts.budget.yaml`](contracts/events/alerts.budget.yaml) | Tenant token budget exhaustion alerts (`warning_80pct`, `blocked`). |
+| **`alerts.cost.anomaly`** | `event-cost` | [`alerts.cost.anomaly.yaml`](contracts/events/alerts.cost.anomaly.yaml) | EWMA-detected multi-sigma spending velocity spikes. |
+| **`llm.toxicity.flagged`** | `toxicity` | `llm.toxicity.flagged.yaml` | Toxic prompt/completion flags requiring safety review. |
+| **`alerts.quality.degradation`**| `quality-engine` | `alerts.quality.degradation.yaml` | Semantic drift and answer coherence degradation warnings. |
+| **`alerts.latency.slo`** | `latency-engine` | `alerts.latency.slo.yaml` | P95/P99 latency SLA violations. |
+| **`alerts.latency.ttft_regression`** | `slo-burn-worker` | `alerts.latency.ttft_regression.yaml`| P99 Time-To-First-Token performance regression alerts. |
 
 ---
 
-## Sequencing & Dependency Map
+## 7. Quick Start & Local Execution
 
-Dependencies must be initialized and started in the following order:
+### 7.1 Running with Docker Compose
+The fastest way to spin up the entire dependency stack (AlloyDB, Redis, Kafka, and Alert Engine):
 
-```
-[Step 1: Core Infra] --------> [Step 2: Database Migration] ----> [Step 3: Verification] ----> [Step 4: Run Worker]
-  • Postgres (5432)              • ./scripts/migrate.sh           • ./scripts/test.sh         • ./scripts/run.sh
-  • Redis (6379)                   (Initializes DB schema           (Runs unit test             (Starts Kafka poll
-  • Kafka (9092)                    and creates indexes)             assertions)                 consumer loop)
-```
-
----
-
-## Setup & Execution
-
-### 1. Configure Environment
-Create a virtual environment and install dependencies:
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# 1. Start backing dependencies
+docker-compose -f deploy/docker/compose/docker-compose.infra.yml up -d
+
+# 2. Run database migrations
+python3 scripts/migrate.py
+
+# 3. Start the alert engine worker container
+docker-compose -f deploy/docker/compose/docker-compose.single.yml up -d
 ```
 
-### 2. Database Migrations
-Apply PostgreSQL database schema migrations to setup the `alert_history` table:
+### 7.2 Running Locally for Development
+
 ```bash
-./scripts/migrate.sh
+# Install dependencies
+pip install -e .
+
+# Run database schema migrations
+python3 scripts/migrate.py
+
+# Start the worker daemon
+python3 src/main.py
 ```
 
-### 3. Run Verification Tests
-Verify all alerting policies, routing logic, and mocks:
+### 7.3 Running Tests
+The test suite validates unit handlers, error mappings, rate limiters, and end-to-end pipelines:
+
 ```bash
-./scripts/test.sh
-```
-
-### 4. Run the Worker
-Start the consumer listening to the Kafka topics:
-```bash
-./scripts/run.sh
+pytest -v tests/
 ```
 
 ---
 
-## Observability & Tracing
+## 8. Health & Observability Endpoints
 
-The alert engine is deeply instrumented with OpenTelemetry to track delivery latencies, database execution times, third-party notification overheads, and propagate distributed trace contexts across services.
-
-### Tracing Instrumentation Hierarchy
-
-The engine generates the following structured spans and sub-spans:
-- **`budget_alert_handler.handle`** (Root span for budget alert processing)
-  - Attributes: `alert.type`, `user_id`, `model`, `event_type`, `alert.suppressed`
-  - Sub-spans:
-    - `budget_alert_handler.check_rate_limit` (with `rate_limit.key` and `rate_limit.acquired`)
-    - `budget_alert_handler.insert_database` (wrapping DB queries)
-    - `budget_alert_handler.notify_slack_channel` / `budget_alert_handler.notify_slack_owner`
-- **`cost_anomaly_alert_handler.handle`** (Root span for anomaly alert processing)
-  - Attributes: `alert.type`, `service`, `model`, `sample_count`, `current_cost`, `ewma_value`, `alert.burn_ratio`
-  - Sub-spans:
-    - `cost_anomaly_alert_handler.insert_database`
-    - `cost_anomaly_alert_handler.check_rate_limit`
-    - `cost_anomaly_alert_handler.notify_slack`
-    - `cost_anomaly_alert_handler.notify_pagerduty`
-- **Adapters Spans**:
-  - `postgres_adapter.insert_alert`: Captures Postgres storage queries.
-  - `redis_adapter.acquire_rate_limit`: Tracks Redis rate limiting locks.
-  - `slack_adapter.post`: Captures outgoing Slack webhook latency and channels.
-  - `pagerduty_adapter.trigger_incident`: Tracks PagerDuty API calls.
-
-### Environment Variables
-- `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP collector endpoint for traces (e.g. `http://localhost:4317`).
-- `OTEL_SERVICE_NAME`: Set to `alert-engine` by default.
-
-Traces are automatically propagated from incoming Kafka message header metadata using the W3C traceparent context standard.
-
-
----
-
-## Docker Deployment
-
-### Build the Image
-To build the Docker image for local development or production releases:
-```bash
-docker build -f build/Dockerfile -t chiefj/alert-engine:latest .
-```
-
-### Deploy using Docker Compose
-Orchestrate all dependent services (PostgreSQL, Redis, Kafka, Tempo/OTLP collector) along with the worker:
-```bash
-docker compose -f deploy/docker/docker-compose.yaml up -d
-```
-
----
-
----
-
-## End-User Usage Guide
-
-This section explains how developers and operators can configure, connect, and run this package either as a standalone container or programmatically in Python.
-
-### 1. Infrastructure Connection Configuration (Environment Variables)
-
-Configure the alert engine by supplying the following environment variables to your container or environment:
-
-| Variable | Description | Default / Example Value |
-| :--- | :--- | :--- |
-| **`KAFKA_BOOTSTRAP_SERVERS`** | Host/port of Kafka brokers | `localhost:9099` (Default) |
-| **`KAFKA_CONSUMER_GROUP`** | Kafka consumer group identifier | `alert-engine-group` |
-| **`KAFKA_TOPICS`** | Comma-separated list of subscribed topics | `alerts.budget,alerts.cost.anomaly` |
-| **`REDIS_URL`** | Redis connection URI for rate limiting | `redis://localhost:6389/0` |
-| **`POSTGRES_DSN`** | Complete Postgres connection DSN (supercedes other variables if set) | `postgresql://user:pass@host:5439/db` |
-| **`POSTGRES_HOST`** | Postgres server host address (fallback when DSN not set) | `localhost` (Default) |
-| **`POSTGRES_PORT`** | Postgres server port (fallback when DSN not set) | `5439` (Default) |
-| **`POSTGRES_USER`** | Postgres database username (fallback when DSN not set) | `postgres` (Default) |
-| **`POSTGRES_PASSWORD`** | Postgres database password (fallback when DSN not set) | `postgres` (Default) |
-| **`POSTGRES_DB`** | Postgres database name (fallback when DSN not set) | `ewma_db` (Default) |
-| **`SLACK_WEBHOOK_URL`** | Webhook URL for Slack alerts | `http://localhost:8080/mock-slack` |
-| **`PAGERDUTY_ROUTING_KEY`** | Integration key for PagerDuty | `mock-pagerduty-routing-key` |
-| **`SERVICE_OWNERS_FILE_PATH`** | Path to service owners file | `service_owners.yaml` |
-| **`PROMETHEUS_METRICS_PORT`** | Port for Prometheus metrics scraping | `9464` |
-| **`HEALTH_CHECK_PORT`** | Port for health probes | `8001` |
-| **`OTEL_EXPORTER_OTLP_ENDPOINT`**| OpenTelemetry trace collector endpoint | `http://localhost:4317` |
-| **`OTEL_SERVICE_NAME`** | OpenTelemetry service identifier | `alert-engine` |
-
-#### Run via Docker:
-Run the container and expose health check (`8001`) and metrics (`9464`) ports:
-```bash
-docker run -d \
-  --name alert-engine \
-  -e KAFKA_BOOTSTRAP_SERVERS="kafka-host:9092" \
-  -e REDIS_URL="redis://redis-host:6379/0" \
-  -e POSTGRES_DSN="postgresql://postgres:postgres@db-host:5432/alert_db" \
-  -e SLACK_WEBHOOK_URL="https://hooks.slack.com/services/T00/B00/X00" \
-  -e PAGERDUTY_ROUTING_KEY="pagerduty-key" \
-  -e OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4317" \
-  -p 8001:8001 \
-  -p 9464:9464 \
-  chiefj/alert-engine:latest
-```
-
----
-
-### 2. Producing Kafka Alert Events (JSON Payloads)
-
-#### Budget Alert Payload (`alerts.budget` topic)
-```json
-{
-  "user_id": "user_12345",
-  "model": "gpt-4-turbo",
-  "event_type": "warning_80pct",
-  "timestamp_utc": "2026-05-28T10:45:00Z"
-}
-```
-*Note: Valid `event_type` options are `"blocked"` and `"warning_80pct"`.*
-
-#### Cost Anomaly Alert Payload (`alerts.cost.anomaly` topic)
-```json
-{
-  "service": "recommendation-service",
-  "model": "claude-3-opus",
-  "hour_of_week": 42,
-  "current_cost": 150.50,
-  "ewma_value": 30.10,
-  "threshold_value": 90.30,
-  "sample_count": 14,
-  "timestamp": "2026-05-28T10:45:00Z",
-  "is_cold_start": false,
-  "cluster_drilldown": [
-    {
-      "cluster_id": "k8s-us-east-1",
-      "cost": 120.40
-    }
-  ]
-}
-```
-
----
-
-### 3. Service Owners Mapping (`service_owners.yaml`)
-When a budget alert with `event_type="warning_80pct"` triggers, the system routes the Slack DM notification to the owner of the service using `service_owners.yaml`.
-Configure this file in your workspace:
-```yaml
-service_owners:
-  recommendation-service: "@john-doe"
-  payment-processor: "@jane-smith"
-  default: "@on-call-infra"
-```
-
----
-
-### 4. Programmatic Usage in Python
-You can import the adapters, config loaders, and handlers directly in your Python application code.
-
-#### Loading Configurations programmatically:
-```python
-from config.config import load_config
-
-# Automatically loads and validates config from environment variables
-config = load_config()
-print(f"Connecting to Kafka at {config.kafka_bootstrap_servers}")
-```
-
-#### Triggering Handlers manually:
-```python
-from src.adapters.postgres.postgres_adapter import PostgresAdapter
-from src.adapters.redis.redis_adapter import RedisAdapter
-from src.adapters.slack.slack_adapter import SlackAdapter
-from src.adapters.metrics.prometheus_adapter import PrometheusAdapter
-from src.handlers.alerts_budget.handler import BudgetAlertHandler
-
-# Initialize the adapter ports
-db_port = PostgresAdapter("postgresql://postgres:postgres@localhost:5432/alert_db")
-redis_port = RedisAdapter("redis://localhost:6379/0")
-slack_port = SlackAdapter("https://hooks.slack.com/services/T00/B00/X00")
-metrics_port = PrometheusAdapter()
-
-# Initialize the handler
-budget_handler = BudgetAlertHandler(
-    db_port=db_port,
-    redis_port=redis_port,
-    slack_port=slack_port,
-    metrics_port=metrics_port,
-    service_owners_path="service_owners.yaml"
-)
-
-# Process budget alert payload manually
-budget_handler.handle({
-    "user_id": "user_12345",
-    "model": "gpt-4",
-    "event_type": "blocked",
-    "service": "recommendation-service",
-    "timestamp_utc": "2026-05-28T10:45:00Z"
-})
-```
-
-
+When the alert engine is running, it exposes the following network ports:
+* **`http://localhost:8001/healthz`**: Liveness probe returning `{"status": "ok", "service": "alert-engine"}`.
+* **`http://localhost:8001/readyz`**: Readiness probe verifying database and broker connectivity.
+* **`http://localhost:9464/metrics`**: Standard Prometheus metrics endpoint exporting event processing counters, delivery latencies, and rate-limit drops.
