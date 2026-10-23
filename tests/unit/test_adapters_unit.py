@@ -7,8 +7,8 @@ from psycopg.errors import IntegrityError
 
 from adapters.postgres.postgres_adapter import PostgresAdapter
 from adapters.redis.redis_adapter import RedisAdapter
-from adapters.slack.slack_adapter import SlackAdapter
-from adapters.pagerduty.pagerduty_adapter import PagerDutyAdapter
+from adapters.notification_senders.slack_adapter import SlackAdapter
+from adapters.notification_senders.pagerduty_adapter import PagerDutyAdapter
 from adapters.metrics.prometheus_adapter import PrometheusAdapter
 from shared.errors.application_error import ValidationError
 
@@ -146,7 +146,7 @@ def test_slack_adapter_handles_url_error() -> None:
         adapter.send_channel_message("#alerts", "Should not raise uncaught exception")
 
 def test_pagerduty_adapter_trigger_and_resolve() -> None:
-    adapter = PagerDutyAdapter("pd-routing-key-123")
+    adapter = PagerDutyAdapter("pd-routing-key-123", "https://events.pagerduty.com/v2/enqueue")
 
     mock_resp = MagicMock()
     mock_resp.__enter__.return_value.read.return_value = b'{"status":"success","dedup_key":"custom-dedup"}'

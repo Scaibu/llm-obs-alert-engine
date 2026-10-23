@@ -30,6 +30,36 @@ postgres:
   timeout_seconds: 5
 
 integrations:
-  slack_webhook_url: "http://localhost:8080/mock-slack"
-  pagerduty_routing_key: "mock-pagerduty-routing-key"
+  slack_webhook_url: ""
+  slack_timeout_seconds: 5.0
+  pagerduty_routing_key: ""
+  pagerduty_endpoint: ""
+  pagerduty_timeout_seconds: 5.0
+  teams_webhook_url: ""
+  opsgenie_api_key: ""
+  opsgenie_endpoint: ""
+  generic_webhook_url: ""
+  discord_webhook_url: ""
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+  telegram_endpoint_template: ""
+  victorops_routing_url: ""
+  datadog_api_key: ""
+  datadog_endpoint: ""
+  new_relic_insert_key: ""
+  new_relic_endpoint: ""
+  grafana_oncall_webhook_url: ""
+  mattermost_webhook_url: ""
+  webex_bot_token: ""
+  webex_room_id: ""
+  webex_endpoint: ""
+  twilio_account_sid: ""
+  twilio_auth_token: ""
+  twilio_from_number: ""
+  twilio_endpoint_template: ""
+  smtp_host: ""
+  smtp_port: 587
+  smtp_user: ""
+  smtp_password: ""
+  smtp_from_email: ""
   service_owners_file: "config/service_owners.yaml"

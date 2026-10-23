@@ -23,6 +23,13 @@ class WorkerConfig:
     service_owners_file_path: str
     prometheus_metrics_port: int
     health_check_port: int
+    slack_timeout_seconds: float = 5.0
+    pagerduty_endpoint: str = ""
+    pagerduty_timeout_seconds: float = 5.0
+    teams_webhook_url: str = ""
+    opsgenie_api_key: str = ""
+    opsgenie_endpoint: str = ""
+    generic_webhook_url: str = ""
 
 class AppConfigLoader:
     _cached_config: dict[str, Any] | None = None
@@ -125,11 +132,24 @@ def load_config(env: dict[str, str] | None = None) -> WorkerConfig:
     default_kafka_bootstrap = str(kafka_cfg.get("bootstrap_servers", "localhost:9099"))
     default_kafka_group = str(kafka_cfg.get("consumer_group", "alert-engine-group"))
     default_redis_url = str(redis_cfg.get("url", "redis://localhost:6389/0"))
-    default_slack_url = str(integrations_cfg.get("slack_webhook_url", "http://localhost:8080/mock-slack"))
-    default_pagerduty_key = str(integrations_cfg.get("pagerduty_routing_key", "mock-pagerduty-routing-key"))
+    default_slack_url = str(integrations_cfg.get("slack_webhook_url", ""))
+    default_pagerduty_key = str(integrations_cfg.get("pagerduty_routing_key", ""))
     default_service_owners = str(integrations_cfg.get("service_owners_file", "config/service_owners.yaml"))
+    default_slack_timeout = float(integrations_cfg.get("slack_timeout_seconds", 5.0))
+    default_pd_endpoint = str(integrations_cfg.get("pagerduty_endpoint", ""))
+    default_pd_timeout = float(integrations_cfg.get("pagerduty_timeout_seconds", 5.0))
     default_metrics_port = str(server_cfg.get("prometheus_metrics_port", "9464"))
     default_health_port = str(server_cfg.get("health_check_port", "8001"))
+
+    try:
+        slack_timeout = float(source.get("SLACK_TIMEOUT_SECONDS", default_slack_timeout))
+    except (ValueError, TypeError):
+        slack_timeout = default_slack_timeout
+
+    try:
+        pd_timeout = float(source.get("PAGERDUTY_TIMEOUT_SECONDS", default_pd_timeout))
+    except (ValueError, TypeError):
+        pd_timeout = default_pd_timeout
 
     return WorkerConfig(
         kafka_bootstrap_servers=source.get("KAFKA_BOOTSTRAP_SERVERS", default_kafka_bootstrap),
@@ -142,4 +162,11 @@ def load_config(env: dict[str, str] | None = None) -> WorkerConfig:
         service_owners_file_path=source.get("SERVICE_OWNERS_FILE_PATH", default_service_owners),
         prometheus_metrics_port=_int_val(source.get("PROMETHEUS_METRICS_PORT", default_metrics_port), "PROMETHEUS_METRICS_PORT"),
         health_check_port=_int_val(source.get("HEALTH_CHECK_PORT", default_health_port), "HEALTH_CHECK_PORT"),
+        slack_timeout_seconds=slack_timeout,
+        pagerduty_endpoint=source.get("PAGERDUTY_ENDPOINT", default_pd_endpoint),
+        pagerduty_timeout_seconds=pd_timeout,
+        teams_webhook_url=source.get("TEAMS_WEBHOOK_URL", str(integrations_cfg.get("teams_webhook_url", ""))),
+        opsgenie_api_key=source.get("OPSGENIE_API_KEY", str(integrations_cfg.get("opsgenie_api_key", ""))),
+        opsgenie_endpoint=source.get("OPSGENIE_ENDPOINT", str(integrations_cfg.get("opsgenie_endpoint", ""))),
+        generic_webhook_url=source.get("GENERIC_WEBHOOK_URL", str(integrations_cfg.get("generic_webhook_url", ""))),
     )

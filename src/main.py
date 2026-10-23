@@ -25,8 +25,8 @@ from config.config import load_config
 from worker.registry import build_registry
 from adapters.postgres.postgres_adapter import PostgresAdapter
 from adapters.redis.redis_adapter import RedisAdapter
-from adapters.slack.slack_adapter import SlackAdapter
-from adapters.pagerduty.pagerduty_adapter import PagerDutyAdapter
+from adapters.notification_senders.slack_adapter import SlackAdapter
+from adapters.notification_senders.pagerduty_adapter import PagerDutyAdapter
 from adapters.metrics.prometheus_adapter import PrometheusAdapter
 from handlers.alerts_budget.handler import BudgetAlertHandler
 from handlers.alerts_cost_anomaly.handler import CostAnomalyAlertHandler
@@ -123,8 +123,15 @@ def main() -> None:
 
     postgres_adapter = PostgresAdapter(config.postgres_dsn)
     redis_adapter = RedisAdapter(config.redis_url)
-    slack_adapter = SlackAdapter(config.slack_webhook_url)
-    pagerduty_adapter = PagerDutyAdapter(config.pagerduty_routing_key)
+    slack_adapter = SlackAdapter(
+        webhook_url=config.slack_webhook_url,
+        timeout_seconds=config.slack_timeout_seconds,
+    )
+    pagerduty_adapter = PagerDutyAdapter(
+        routing_key=config.pagerduty_routing_key,
+        endpoint=config.pagerduty_endpoint,
+        timeout_seconds=config.pagerduty_timeout_seconds,
+    )
     metrics_adapter = PrometheusAdapter()
 
     budget_handler = BudgetAlertHandler(
